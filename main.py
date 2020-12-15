@@ -10,13 +10,13 @@ import datetime
 import numpy as np
 from utils import evaluate
 from utils.optim import Optim
-from typing import Tuple, List
 from config.args import parse_args
 from torch.utils.data import DataLoader
+from typing import Tuple, List, Dict, Union
 from utils.visual_logger import VisualLogger
-from utils.trees import write_trees, InternalTreebankNode
 from utils.init_utils import model_init, load_data, vocabs_init
-from config.Constants import BATCH_SNT_MAX_LENGTH, SUB_BATCH_TIMES
+from utils.trees import write_trees, InternalTreebankNode, InternalParseNode
+from config.Constants import BATCH_MAX_SNT_LENGTH, DATASET_MAX_SNT_LENGTH, LANGS_NEED_SEG, CHARACTER_BASED
 
 
 def preprocess() -> argparse.Namespace:
@@ -44,7 +44,8 @@ def preprocess() -> argparse.Namespace:
     if not os.path.exists(args.save_path) and not args.debug:
         os.makedirs(args.save_path)
     # ====== cuda enable ====== #
-    args.device = torch.device('cuda:'+str(args.gpuid)) if args.cuda and torch.cuda.is_available() else torch.device('cpu')
+    args.device = \
+        torch.device('cuda:'+str(args.gpuid)) if args.cuda and torch.cuda.is_available() else torch.device('cpu')
     torch.cuda.set_device(args.gpuid)
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
     print(args, end='\n\n')
@@ -71,6 +72,37 @@ def eval_model(model: torch.nn.Module, dataset: DataLoader, treebank: List[Inter
     print('Model performance in %s dataset: %s' % (type_, eval_fscore))
     torch.cuda.empty_cache()
     return eval_fscore, trees_predicted
+
+
+def batch_filter(insts: Dict[str, List[Union[List[str], InternalParseNode]]], language: str, subword: str)\
+        -> Tuple[Dict[str, List[Union[List[str], InternalParseNode]]], int, int]:
+    pos_tags, snts, gold_trees = insts['pos_tags'], insts['snts'], insts['gold_trees']
+    res_pos_tags, res_snts, res_gold_trees = [], [], []
+    max_len = 0
+    assert len(pos_tags) == len(snts) == len(gold_trees)
+    for pos_tag, snt, gold_tree in zip(pos_tags, snts, gold_trees):
+        if language in LANGS_NEED_SEG and subword != CHARACTER_BASED:
+            snt_len = sum([len(word) for word in snt])
+        else:
+            snt_len = len(snt)
+        if snt_len <= DATASET_MAX_SNT_LENGTH:
+            res_pos_tags.append(pos_tag)
+            res_snts.append(snt)
+            res_gold_trees.append(gold_tree)
+            if max_len < snt_len:
+                max_len = snt_len
+    if len(res_snts) == 0:
+        res_pos_tags, res_snts, res_gold_trees = pos_tags[0], snts[0], gold_trees[0]
+    return {'pos_tags': res_pos_tags, 'snts': res_snts, 'gold_trees': res_gold_trees}, len(res_snts), max_len
+
+
+def batch_spliter(insts: Dict[str, List[Union[List[str], InternalParseNode]]], max_len: int)\
+        -> List[Dict[str, List[Union[List[str], InternalParseNode]]]]:
+    sub_batch_times = (max_len // BATCH_MAX_SNT_LENGTH) + 1
+    res = []
+    for i in range(sub_batch_times):
+        res.append({key: insts[key][i::sub_batch_times] for key in insts.keys()})
+    return res
 
 
 def main():
@@ -101,18 +133,18 @@ def main():
     # ========= Training ========= #
     print('Training starts...')
     start = time.time()
-    steps, loss_value = 1, 0.
+    steps, loss_value, total_batch_size = 1, 0., 0
     best_dev, best_test = None, None
     patience = args.patience * (len(train_data)//(args.accum_steps*args.eval_interval))
     for epoch_i in range(1, args.epoch):
         for batch_i, insts in enumerate(train_data, start=1):
             model.train()
 
-            max_len = max([len(pos_tag) for pos_tag in insts['pos_tags']])
-            batch_size = len(insts['pos_tags'])
-            sub_batch_times = 1 if batch_size == 1 or max_len < BATCH_SNT_MAX_LENGTH else SUB_BATCH_TIMES
-            for times_i in range(sub_batch_times):
-                loss = model({key: insts[key][times_i:batch_size:sub_batch_times] for key in insts.keys()})
+            insts, batch_size, max_len = batch_filter(insts, args.language, args.subword)
+            insts_list = batch_spliter(insts, max_len)
+            total_batch_size += batch_size
+            for insts in insts_list:
+                loss = model(insts)
                 if loss.item() > 0.:
                     loss.backward()
                     loss_value += loss.item()
@@ -127,14 +159,14 @@ def main():
             if steps % (args.accum_steps * args.log_interval) == 0:
                 print(
                     '[%d/%d], [%d/%d] Loss: %.05f' %
-                    (epoch_i, args.epoch, batch_i//args.accum_steps, len(train_data)//args.accum_steps, loss_value),
-                    flush=True
+                    (epoch_i, args.epoch, batch_i//args.accum_steps, len(train_data)//args.accum_steps,
+                     loss_value/total_batch_size), flush=True
                 )
                 visual_dic = {'loss/train': loss_value, 'lr': optimizer.get_lr()[0]}
                 if args.clip_grad:
                     visual_dic['norm'] = optimizer.get_dynamic_gard_norm()
                 args.visual_logger.visual_scalars(visual_dic, steps // args.accum_steps)
-                loss_value = 0.
+                loss_value, total_batch_size = 0., 0
             if steps % (args.accum_steps * args.eval_interval) == 0:
                 if args.early_stop:
                     patience -= 1

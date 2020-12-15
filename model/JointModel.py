@@ -46,11 +46,11 @@ class JointModel(nn.Module):
     def forward(self, insts: Dict[str, List[Union[List[str], InternalParseNode]]], return_charts: bool = False):
         """forward func of the model.
         Args:
-            insts: input insts, including 'pos_tags', 'words', 'gold_trees'
+            insts: input insts, including 'pos_tags', 'snts', 'gold_trees'
         Returns:
             pred tensor outputed by model
         """
-        pos_tags, snts = insts['pos_tags'], insts['words']
+        pos_tags, snts = insts['pos_tags'], insts['snts']
         snts_len = [len(pos_tag) for pos_tag in pos_tags]
         batch_size, seq_len = len(snts_len), max(snts_len)
         embeddings, mask = self.embeddings(pos_tags, snts)

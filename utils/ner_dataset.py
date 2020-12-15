@@ -33,6 +33,6 @@ def pad_collate_fn(insts) -> Dict[str, List[Union[List[str], InternalParseNode]]
         snts.append(inst['words'])
         gold_trees.append(inst['gold_tree'])
     assert len(pos_tags) == len(snts) == len(gold_trees)
-    for pos_tag, snt in zip(pos_tags, snts):
-        assert len(pos_tag) == len(snt)
+    for pos_tag, word in zip(pos_tags, snts):
+        assert len(pos_tag) == len(word)
     return {'pos_tags': pos_tags, 'snts': snts, 'gold_trees': gold_trees}

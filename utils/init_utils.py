@@ -70,7 +70,7 @@ def load_data(name: str, path: str, batch_size: int, shuffle: bool, num_workers:
     res = []
     assert DATASET_LIST[0] == 'train'
     for item in DATASET_LIST:
-        treebank = load_trees(os.path.join(path, item+'.corpus'), strip_top=False)
+        treebank = load_trees(os.path.join(path, item+'.corpus'), strip_top=True)
         res.append(treebank)
         parse_trees = [tree.convert() for tree in treebank]
         print('len(%s_data): %d' % (item, len(parse_trees)))

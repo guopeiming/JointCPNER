@@ -237,21 +237,21 @@ def load_trees(path, strip_top=True, strip_spmrl_features=True):
                 trees[i] = InternalTreebankNode("VROOT", [tree])
 
     # ================guopeiming deleteing=============
-    # if strip_top:
-    #     for i, tree in enumerate(trees):
-    #         if tree.label in ("TOP", "ROOT"):
-    #             assert len(tree.children) == 1
-    #             trees[i] = tree.children[0]
-    # =================guopeiming adding===============
     if strip_top:
-        num = 0
         for i, tree in enumerate(trees):
             if tree.label in ("TOP", "ROOT"):
-                if len(tree.children) == 1:
-                    trees[i] = tree.children[0]
-                else:
-                    num += 1
-        print('bad cases num: %d' % num)
+                assert len(tree.children) == 1
+                trees[i] = tree.children[0]
+    # =================guopeiming adding===============
+    # if strip_top:
+    #     num = 0
+    #     for i, tree in enumerate(trees):
+    #         if tree.label in ("TOP", "ROOT"):
+    #             if len(tree.children) == 1:
+    #                 trees[i] = tree.children[0]
+    #             else:
+    #                 num += 1
+    #     print('bad cases num: %d' % num)
     # =================guopeiming alter ending=========
 
 
