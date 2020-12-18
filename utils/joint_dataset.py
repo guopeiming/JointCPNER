@@ -1,8 +1,11 @@
 # @Author : guopeiming
 # @Contact : guopeiming.gpm@{qq, gmail}.com
-from torch.utils.data import Dataset
-from typing import List, Dict, Union
-from utils.trees import InternalParseNode
+import os
+from torch.utils.data import Dataset, DataLoader
+from utils.vocabulary import Vocabulary
+from typing import List, Dict, Union, Tuple
+from utils.trees import InternalParseNode, load_trees
+from config.Constants import LANGS_NEED_SEG, DATASET_LIST, START, STOP, UNK, TAG_UNK, EMPTY_LABEL
 
 
 class JointDataset(Dataset):
@@ -20,8 +23,8 @@ class JointDataset(Dataset):
         return {'pos_tags': pos_tags, 'words': words, 'gold_tree': self.parse_trees[idx]}
 
 
-def pad_collate_fn(insts) -> Dict[str, List[Union[List[str], InternalParseNode]]]:
-    """Pad the instance to the max seq length in batch
+def aggregate_collate_fn(insts) -> Dict[str, List[Union[List[str], InternalParseNode]]]:
+    """aggregate the instance to the max seq length in batch
     Args:
         insts: list of sample
     Returns:
@@ -36,3 +39,105 @@ def pad_collate_fn(insts) -> Dict[str, List[Union[List[str], InternalParseNode]]
     for pos_tag, snt in zip(pos_tags, snts):
         assert len(pos_tag) == len(snt)
     return {'pos_tags': pos_tags, 'snts': snts, 'gold_trees': gold_trees}
+
+
+def batch_filter(insts: Dict[str, List[Union[List[str], InternalParseNode]]], language: str,
+                 DATASET_MAX_SNT_LENGTH: int) -> Tuple[Dict[str, List[Union[List[str], InternalParseNode]]], int, int]:
+    pos_tags, snts, gold_trees = insts['pos_tags'], insts['snts'], insts['gold_trees']
+    res_pos_tags, res_snts, res_gold_trees = [], [], []
+    max_len = 0
+    assert len(pos_tags) == len(snts) == len(gold_trees)
+    for pos_tag, snt, gold_tree in zip(pos_tags, snts, gold_trees):
+        if language in LANGS_NEED_SEG:
+            snt_len = sum([len(word) for word in snt])
+        else:
+            snt_len = len(snt)
+        if snt_len <= DATASET_MAX_SNT_LENGTH:
+            res_pos_tags.append(pos_tag)
+            res_snts.append(snt)
+            res_gold_trees.append(gold_tree)
+            if max_len < snt_len:
+                max_len = snt_len
+    if len(res_snts) == 0:
+        res_pos_tags, res_snts, res_gold_trees = pos_tags[0], snts[0], gold_trees[0]
+    return {'pos_tags': res_pos_tags, 'snts': res_snts, 'gold_trees': res_gold_trees}, len(res_snts), max_len
+
+
+def batch_spliter(insts: Dict[str, List[Union[List[str], InternalParseNode]]], max_len: int, BATCH_MAX_SNT_LENGTH: int)\
+        -> List[Dict[str, List[Union[List[str], InternalParseNode]]]]:
+    sub_batch_times = (max_len // BATCH_MAX_SNT_LENGTH) + 1
+    res = []
+    for i in range(sub_batch_times):
+        res.append({key: insts[key][i::sub_batch_times] for key in insts.keys()})
+    return res
+
+
+def load_data(path: str, batch_size: int, shuffle: bool, num_workers: int, drop_last: bool)\
+        -> Tuple[DataLoader, DataLoader, DataLoader, Dict[str, Vocabulary]]:
+    """load the datasets.
+    Args:
+        path: path of input data.
+        batch_size: the number of insts in a batch.
+        shuffle: whether to shuffle the dataset.
+        num_workers: the number of process to load data.
+        drop_last: whether to drop the last data.
+    Returns:
+        treebank and Dataloader of train, dev, test data. batch_filter. batch_spliter. vocabs
+    """
+    print('data loading starts...', flush=True)
+    res = tuple()
+    vocabs = None
+    assert DATASET_LIST[0] == 'train'
+    for item in DATASET_LIST:
+        treebank = load_trees(os.path.join(path, item+'.corpus'), strip_top=True)
+        parse_trees = [tree.convert() for tree in treebank]
+        print('len(%s_data): %d' % (item, len(parse_trees)))
+
+        if item == DATASET_LIST[0]:
+            vocabs = vocabs_init(parse_trees)
+
+        data_loader = DataLoader(
+                        JointDataset(parse_trees),
+                        batch_size=batch_size,
+                        shuffle=shuffle if item == DATASET_LIST[0] else False,
+                        num_workers=num_workers,
+                        collate_fn=aggregate_collate_fn,
+                        drop_last=drop_last)
+        res = res + (data_loader, )
+    return res + (vocabs, )
+
+
+def vocabs_init(train_data: List[InternalParseNode]) -> Dict[str, Vocabulary]:
+    print("Constructing vocabularies...", flush=True)
+
+    pos_tags_vocab = Vocabulary()
+    pos_tags_vocab.index(START)
+    pos_tags_vocab.index(STOP)
+    pos_tags_vocab.index(TAG_UNK)
+
+    # words_vocab = Vocabulary()
+    # words_vocab.index(START)
+    # words_vocab.index(STOP)
+    # words_vocab.index(UNK)
+
+    labels_vocab = Vocabulary()
+    labels_vocab.index(EMPTY_LABEL)
+
+    for tree in train_data:
+        nodes = [tree]
+        while nodes:
+            node = nodes.pop()
+            if isinstance(node, InternalParseNode):
+                labels_vocab.index(node.label)
+                nodes.extend(reversed(node.children))
+            else:
+                pos_tags_vocab.index(node.tag)
+                # words_vocab.index(node.word)
+
+    pos_tags_vocab.freeze()
+    # words_vocab.freeze()
+    labels_vocab.freeze()
+
+    print('len(pos_tags_vocab): %d\nlen(labels_vocab): %d' % (pos_tags_vocab.size, labels_vocab.size))
+
+    return {'pos_tags': pos_tags_vocab, 'labels': labels_vocab}

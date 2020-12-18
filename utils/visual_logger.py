@@ -4,8 +4,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 
 class VisualLogger:
-    def __init__(self, name: str):
-        self.writer = SummaryWriter(comment='.'+name)
+    def __init__(self, path: str):
+        self.writer = SummaryWriter(path)
 
     def visual_scalars(self, dic, step):
         for tag in dic:
@@ -23,6 +23,3 @@ class VisualLogger:
 
     def close(self):
         self.writer.close()
-
-    def __repr__(self):
-        return 'tensor_board: ./runs/'

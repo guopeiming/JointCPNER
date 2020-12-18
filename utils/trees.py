@@ -253,8 +253,6 @@ def load_trees(path, strip_top=True, strip_spmrl_features=True):
     #                 num += 1
     #     print('bad cases num: %d' % num)
     # =================guopeiming alter ending=========
-
-
     return trees
 
 

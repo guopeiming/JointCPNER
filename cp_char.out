@@ -1,0 +1,30 @@
+preprocessing starts...
+
+[34mAuto commit by fitlog[0m
+Namespace(BATCH_MAX_SNT_LENGTH=80, DATASET_MAX_SNT_LENGTH=250, accum_steps=1, attention_dropout=0.2, batch_size=16, bert_emb_dropout=0.2, bert_path='/home/data/embedding/bert-base-chinese/', clip_grad=False, clip_grad_max_norm=4.0, cuda=True, d_model=1024, debug=False, device=device(type='cuda', index=6), dim_ff=2048, drop_last=False, early_stop=True, emb_dropout=0.0, epoch=35, eval_interval=700, evalb_path='./EVALB_SPMRL/', gpuid=6, hidden_dropout=0.2, input='./data/onto/parsing_char/', kqv_dim=64, label_hidden=250, language='chinese', layer_num=3, log_interval=200, lr=0.001, lr_decay_factor=1.00001, lr_fine_tune=1e-05, name='CPModel', nhead=8, num_workers=4, optim='Adam', partition=True, patience=3, pos_tag_emb_dropout=0.2, position_emb_dropout=0.0, save=False, save_path='./logs/my_log-2020-12-19-02-52-08', seed=2021, shuffle=True, subword='character_based', transliterate='', use_pos_tag=False, visual_logger=<utils.visual_logger.VisualLogger object at 0x7f1af38f0a20>, warmup_steps=9000, weight_decay=0.01)
+
+data loading starts...
+len(train_data): 36106
+Constructing vocabularies...
+len(pos_tags_vocab): 4
+len(labels_vocab): 631
+len(dev_data): 6019
+len(test_data): 4437
+
+Model Preparing starts...
+len(total_parameters): 119104416, len(fine_tuned_parameters): 102267648, ratio: 0.85864
+
+Training starts...
+[1/35], [200/2257] Loss: 137.31275
+[1/35], [400/2257] Loss: 95.63975
+[1/35], [600/2257] Loss: 76.30359
+model evaluating starts...
+Model performance in dev dataset: evalb: (Recall=45.14, Precision=50.59, FScore=47.71, CompleteMatch=3.84)
+Model performance in test dataset: evalb: (Recall=44.78, Precision=49.84, FScore=47.18, CompleteMatch=3.63)
+best performance:
+dev:(Recall=45.14, Precision=50.59, FScore=47.71, CompleteMatch=3.84)
+test:(Recall=44.78, Precision=49.84, FScore=47.18, CompleteMatch=3.63)
+model evaluating ends...
+[1/35], [800/2257] Loss: 58.06322
+[1/35], [1000/2257] Loss: 41.16548
+[1/35], [1200/2257] Loss: 35.22040

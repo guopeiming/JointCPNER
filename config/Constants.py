@@ -2,7 +2,7 @@
 # @Contact : guopeiming.gpm@{qq, gmail}.com
 
 
-FINE_TUNE_NAME = '.BERT.'  # warning: keep the model name and the value and the name in optim consistent.
+FINE_TUNE_NAME = 'BERT.'  # warning: keep the model name and the value and the name in optim consistent.
 
 LANGS_NEED_SEG = ['chinese', 'arabic']
 

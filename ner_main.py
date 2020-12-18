@@ -8,15 +8,15 @@ import random
 import argparse
 import datetime
 import numpy as np
-from utils import evaluate
+from utils.vocab import Vocab
 from utils.optim import Optim
-from config.args import parse_args
+from utils import ner_evaluate
+from model.NERModel import NERModel
+from typing import Tuple, List, Dict
+from config.ner_args import parse_args
 from torch.utils.data import DataLoader
-from typing import Tuple, List, Dict, Union
 from utils.visual_logger import VisualLogger
-from utils.init_utils import model_init, load_data, vocabs_init
-from utils.trees import write_trees, InternalTreebankNode, InternalParseNode
-from config.Constants import BATCH_MAX_SNT_LENGTH, DATASET_MAX_SNT_LENGTH, LANGS_NEED_SEG, CHARACTER_BASED
+from utils.ner_dataset import load_data, write_ners, batch_filter, batch_spliter
 
 
 def preprocess() -> argparse.Namespace:
@@ -32,17 +32,17 @@ def preprocess() -> argparse.Namespace:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
-    # ====== fitlog init ====== #
-    fitlog.commit(__file__)
-    fitlog.debug(args.debug)
-    fitlog.add_hyper(args)
-    # ====== tb VisualLogger init ====== #
-    args.visual_logger = VisualLogger(args.name) if not args.debug else None
     # ====== save path ====== #
     now_time = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
     args.save_path = os.path.join('./logs/', 'my_log-' + now_time)
     if not os.path.exists(args.save_path) and not args.debug:
         os.makedirs(args.save_path)
+    # ====== fitlog init ====== #
+    fitlog.commit(__file__)
+    fitlog.debug(args.debug)
+    fitlog.add_hyper(args)
+    # ====== tb VisualLogger init ====== #
+    args.visual_logger = VisualLogger(args.save_path) if not args.debug else None
     # ====== cuda enable ====== #
     args.device = \
         torch.device('cuda:'+str(args.gpuid)) if args.cuda and torch.cuda.is_available() else torch.device('cpu')
@@ -61,48 +61,28 @@ def postprocess(args: argparse.Namespace, start: float):
 
 
 @torch.no_grad()
-def eval_model(model: torch.nn.Module, dataset: DataLoader, treebank: List[InternalTreebankNode], evalb_path: str,
-               type_: str) -> Tuple[evaluate.FScore, List[InternalTreebankNode]]:
-    trees_predicted = []
+def eval_model(model: torch.nn.Module, dataset: DataLoader, vocab: Vocab, type_: str)\
+        -> Tuple[float, ner_evaluate.FScore, Dict[str, List[List[str]]]]:
+    tags_pred, tags_gold, snts, loss_value, batches = [], [], [], 0., 0
     for insts in dataset:
         model.eval()
-        trees_batch, _ = model(insts)
-        trees_predicted.extend([tree.convert() for tree in trees_batch])
-    eval_fscore = evaluate.evalb(evalb_path, treebank, trees_predicted)
-    print('Model performance in %s dataset: %s' % (type_, eval_fscore))
+        loss, tags_batch_pred = model(insts)
+        if loss.item() > 0:
+            loss_value += loss.item()
+        assert not isinstance(loss_value, torch.Tensor), 'GPU memory leak'
+
+        batches += len(tags_pred)
+        snts.extend(insts['snts'])
+        tags_batch_gold = insts['golds']
+        tags_pred.extend(vocab.decode(tags_batch_pred))
+        tags_gold.extend(tags_batch_gold)
+
+    assert len(tags_pred) == len(tags_gold)
+    fscore = ner_evaluate.cal_preformence(tags_pred, tags_gold)
+    loss_value = loss_value / batches
+    print('Model performance in %s dataset: loss: %.05f metric: %s' % (type_, loss_value, fscore))
     torch.cuda.empty_cache()
-    return eval_fscore, trees_predicted
-
-
-def batch_filter(insts: Dict[str, List[Union[List[str], InternalParseNode]]], language: str, subword: str)\
-        -> Tuple[Dict[str, List[Union[List[str], InternalParseNode]]], int, int]:
-    pos_tags, snts, gold_trees = insts['pos_tags'], insts['snts'], insts['gold_trees']
-    res_pos_tags, res_snts, res_gold_trees = [], [], []
-    max_len = 0
-    assert len(pos_tags) == len(snts) == len(gold_trees)
-    for pos_tag, snt, gold_tree in zip(pos_tags, snts, gold_trees):
-        if language in LANGS_NEED_SEG and subword != CHARACTER_BASED:
-            snt_len = sum([len(word) for word in snt])
-        else:
-            snt_len = len(snt)
-        if snt_len <= DATASET_MAX_SNT_LENGTH:
-            res_pos_tags.append(pos_tag)
-            res_snts.append(snt)
-            res_gold_trees.append(gold_tree)
-            if max_len < snt_len:
-                max_len = snt_len
-    if len(res_snts) == 0:
-        res_pos_tags, res_snts, res_gold_trees = pos_tags[0], snts[0], gold_trees[0]
-    return {'pos_tags': res_pos_tags, 'snts': res_snts, 'gold_trees': res_gold_trees}, len(res_snts), max_len
-
-
-def batch_spliter(insts: Dict[str, List[Union[List[str], InternalParseNode]]], max_len: int)\
-        -> List[Dict[str, List[Union[List[str], InternalParseNode]]]]:
-    sub_batch_times = (max_len // BATCH_MAX_SNT_LENGTH) + 1
-    res = []
-    for i in range(sub_batch_times):
-        res.append({key: insts[key][i::sub_batch_times] for key in insts.keys()})
-    return res
+    return loss_value, fscore, {'snts': snts, 'tags': tags_pred}
 
 
 def main():
@@ -110,17 +90,19 @@ def main():
     args = preprocess()
 
     # ====== Loading dataset ====== #
-    train_treebank, train_data, dev_treebank, dev_data, test_treebank, test_data = load_data(
-        args.name, args.input, args.batch_size, args.shuffle, args.num_workers, args.drop_last
+    train_data, dev_data, test_data, vocab = load_data(
+        args.input, args.batch_size, args.shuffle, args.num_workers, args.drop_last
     )
-    write_trees(os.path.join(args.save_path, 'dev.gold.trees'), dev_treebank)
-    write_trees(os.path.join(args.save_path, 'test.gold.trees'), test_treebank)
-    vocabs = vocabs_init(train_data)
 
     # ======= Preparing Model ======= #
-    print("Model Preparing starts...")
-    model = model_init(args, vocabs).to(args.device)
-    print(model, end='\n\n\n')
+    print("\nModel Preparing starts...")
+    model = NERModel(
+                vocab,
+                # Embedding
+                args.bert_path,
+                args.device
+            ).to(args.device)
+    # print(model, end='\n\n\n')
     optimizer = Optim(model, args.optim, args.lr, args.lr_fine_tune, args.warmup_steps, args.lr_decay_factor,
                       args.weight_decay, args.clip_grad, args.clip_grad_max_norm)
     optimizer.zero_grad()
@@ -140,11 +122,11 @@ def main():
         for batch_i, insts in enumerate(train_data, start=1):
             model.train()
 
-            insts, batch_size, max_len = batch_filter(insts, args.language, args.subword)
-            insts_list = batch_spliter(insts, max_len)
+            insts, batch_size, max_len = batch_filter(insts, args.language, args.DATASET_MAX_SNT_LENGTH)
+            insts_list = batch_spliter(insts, max_len, args.BATCH_MAX_SNT_LENGTH)
             total_batch_size += batch_size
             for insts in insts_list:
-                loss = model(insts)
+                loss, _ = model(insts)
                 if loss.item() > 0.:
                     loss.backward()
                     loss_value += loss.item()
@@ -155,7 +137,6 @@ def main():
             if steps % args.accum_steps == 0:
                 optimizer.step()
                 optimizer.zero_grad()
-                torch.cuda.empty_cache()
             if steps % (args.accum_steps * args.log_interval) == 0:
                 print(
                     '[%d/%d], [%d/%d] Loss: %.05f' %
@@ -167,25 +148,29 @@ def main():
                     visual_dic['norm'] = optimizer.get_dynamic_gard_norm()
                 args.visual_logger.visual_scalars(visual_dic, steps // args.accum_steps)
                 loss_value, total_batch_size = 0., 0
+                torch.cuda.empty_cache()
             if steps % (args.accum_steps * args.eval_interval) == 0:
                 if args.early_stop:
                     patience -= 1
                 print('model evaluating starts...')
-                fscore_dev, predict_dev = eval_model(model, dev_data, dev_treebank, args.evalb_path, 'dev')
-                fscore_test, predict_test = eval_model(model, test_data, test_treebank, args.evalb_path, 'test')
-                visual_dic = {'F/dev': fscore_dev.fscore, 'F/test': fscore_test.fscore}
+                loss_dev, fscore_dev, pred_dev = eval_model(model, dev_data, vocab, 'dev')
+                loss_test, fscore_test, pred_test = eval_model(model, test_data, vocab, 'test')
+                visual_dic = {
+                    'F/dev': fscore_dev.fscore, 'loss/dev': loss_dev, 'F/test': fscore_test.fscore,
+                    'loss/test': loss_test
+                }
                 args.visual_logger.visual_scalars(visual_dic, steps // args.accum_steps)
                 if best_dev is None or fscore_dev.fscore >= best_dev.fscore:
                     best_dev, best_test = fscore_dev, fscore_test
                     fitlog.add_best_metric({'f_dev': best_dev.fscore, 'f_test': best_test.fscore})
                     patience = args.patience * (len(train_data)//(args.accum_steps*args.eval_interval))
-                    write_trees(os.path.join(args.save_path, 'dev.best.trees'), predict_dev)
-                    write_trees(os.path.join(args.save_path, 'test.best.trees'), predict_test)
+                    write_ners(os.path.join(args.save_path, 'dev.best.ners'), pred_dev)
+                    write_ners(os.path.join(args.save_path, 'test.best.ners'), pred_test)
                     if args.save:
                         torch.save(model.pack_state_dict(), os.path.join(args.save_path, args.name+'.best.model.pt'))
-                print('best performance:\ndev:%s\ntest:%s' % (best_dev, best_test))
+                print('best performance:\ndev: %s\ntest: %s' % (best_dev, best_test))
                 print('model evaluating ends...', flush=True)
-                del predict_dev, predict_test
+                del pred_dev, pred_test
                 if args.debug:
                     exit(0)
             steps += 1
