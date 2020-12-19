@@ -177,7 +177,7 @@ def main():
                     args.evalb_path, 'test')
                 visual_dic = {'F/dev': fscore_dev.fscore, 'F/test': fscore_test.fscore}
                 args.visual_logger.visual_scalars(visual_dic, steps // args.accum_steps)
-                if best_dev is None or fscore_dev.fscore >= best_dev.fscore:
+                if best_dev is None or fscore_dev.fscore > best_dev.fscore:
                     best_dev, best_test = fscore_dev, fscore_test
                     fitlog.add_best_metric({'f_dev': best_dev.fscore, 'f_test': best_test.fscore})
                     patience = args.patience * (len(train_data)//(args.accum_steps*args.eval_interval))

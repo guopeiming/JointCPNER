@@ -140,3 +140,4 @@ SAPar/
 runs/
 .vscode/
 note.md
+*.out

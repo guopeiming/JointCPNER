@@ -64,7 +64,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--evalb_path', default='./EVALB_SPMRL/', type=str, help='path of evaluation script')
 
     # [Constants]
-    parser.add_argument('--DATASET_MAX_SNT_LENGTH', default=250, type=str, help='when sentence length larger than it, drop it')
+    parser.add_argument('--DATASET_MAX_SNT_LENGTH', default=240, type=str, help='when sentence length larger than it, drop it')
     parser.add_argument('--BATCH_MAX_SNT_LENGTH', default=80, type=str, help='when sentence max len bigger than it, split batch to sub-batch')
 
     args = parser.parse_args()
