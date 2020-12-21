@@ -69,12 +69,13 @@ def batch_spliter(insts: Dict[str, List[List[str]]], max_len: int, BATCH_MAX_SNT
     return res
 
 
-def load_data(path: str, batch_size: int, shuffle: bool, num_workers: int, drop_last: bool)\
+def load_data(path: str, batch_size: int, accum_steps: int, shuffle: bool, num_workers: int, drop_last: bool)\
         -> Tuple[DataLoader, DataLoader, DataLoader, Vocab]:
     """load the datasets.
     Args:
         path: path of input data.
         batch_size: the number of insts in a batch.
+        accum_steps: sccumulation steps.
         shuffle: whether to shuffle the dataset.
         num_workers: the number of process to load data.
         drop_last: whether to drop the last data.
@@ -97,8 +98,8 @@ def load_data(path: str, batch_size: int, shuffle: bool, num_workers: int, drop_
 
         data_loader = DataLoader(
                         NERDataset(snts, golds),
-                        batch_size=batch_size,
-                        shuffle=shuffle if item == DATASET_LIST[0] else False,
+                        batch_size=batch_size if item == DATASET_LIST[0] else batch_size*accum_steps,
+                        shuffle=shuffle,
                         num_workers=num_workers,
                         collate_fn=aggregate_collate_fn,
                         drop_last=drop_last)
@@ -134,12 +135,14 @@ def vocabs_init(train_data: List[str]) -> Vocab:
     return vocab
 
 
-def write_ners(path: str, insts: Dict[str, List[List[str]]]):
-    snts, tags = insts['snts'], insts['tags']
-    assert len(snts) == len(tags)
-    with open(path, 'w', encoding='utf-8') as writer:
-        for snt, tag in zip(snts, tags):
-            assert len(snt) == len(tag)
-            for word, ner in zip(snt, tag):
-                writer.write(word + '\t' + ner + '\n')
-            writer.write('\n')
+def write_ners(path_pred: str, path_gold: str, insts: Dict[str, List[List[str]]]):
+    snts, tags_pred, tags_gold = insts['snts'], insts['pred_tags'], insts['gold_tags']
+    assert len(snts) == len(tags_pred) == len(tags_gold)
+    with open(path_pred, 'w', encoding='utf-8') as writer_pred, open(path_gold, 'w', encoding='utf-8') as writer_gold:
+        for snt, tag_pred, tag_gold in zip(snts, tags_pred, tags_gold):
+            assert len(snt) == len(tag_pred) == len(tag_gold)
+            for word, ner_pred, ner_gold in zip(snt, tag_pred, tag_gold):
+                writer_pred.write(word + '\t' + ner_pred + '\n')
+                writer_gold.write(word + '\t' + ner_gold + '\n')
+            writer_pred.write('\n')
+            writer_gold.write('\n')

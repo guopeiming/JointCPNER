@@ -3,8 +3,10 @@
 from typing import List, Set, Tuple
 
 
-class FScore(object):
+class NERFScore(object):
     def __init__(self, true_positive: int, false_positive: int, false_negetive: int):
+        super(NERFScore, self).__init__()
+
         if true_positive+false_negetive == 0:
             self.recall = true_positive/(true_positive+false_negetive+1)
         else:
@@ -52,7 +54,7 @@ def _bio_tag_to_spans(tags: List[str], ignore_labels=None) -> Set[Tuple[str, Tup
     return {(span[0], (span[1][0], span[1][1] + 1)) for span in spans if span[0] not in ignore_labels}
 
 
-def cal_preformence(tags_pred: List[List[str]], tags_gold: List[List[str]], ignore_labels=None) -> FScore:
+def cal_preformence(tags_pred: List[List[str]], tags_gold: List[List[str]], ignore_labels=None) -> NERFScore:
     """计算基于span的F1、P、R.
     Args:
         tags_pred: 裁剪后的label
@@ -77,7 +79,7 @@ def cal_preformence(tags_pred: List[List[str]], tags_gold: List[List[str]], igno
                 false_positive += 1
 
         false_negative += len(spans_gold)
-    return FScore(true_positive, false_positive, false_negative)
+    return NERFScore(true_positive, false_positive, false_negative)
 
 
 if __name__ == '__main__':

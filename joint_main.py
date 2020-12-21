@@ -8,15 +8,15 @@ import random
 import argparse
 import datetime
 import numpy as np
-from utils.vocab import Vocab
 from utils.optim import Optim
-from utils import ner_evaluate
-from model.NERModel import NERModel
-from typing import Tuple, List, Dict
-from config.ner_args import parse_args
+from utils import joint_evaluate
+from model.CPModel import CPModel
+from typing import Tuple, List, Set, Union, Dict
+from config.joint_args import parse_args
 from torch.utils.data import DataLoader
 from utils.visual_logger import VisualLogger
-from utils.ner_dataset import load_data, write_ners, batch_filter, batch_spliter
+from utils.trees import InternalTreebankNode
+from utils.joint_dataset import load_data, batch_filter, batch_spliter, write_joint_data
 
 
 def preprocess() -> argparse.Namespace:
@@ -61,28 +61,26 @@ def postprocess(args: argparse.Namespace, start: float):
 
 
 @torch.no_grad()
-def eval_model(model: torch.nn.Module, dataset: DataLoader, vocab: Vocab, type_: str)\
-        -> Tuple[float, ner_evaluate.NERFScore, Dict[str, List[List[str]]]]:
-    tags_pred, tags_gold, snts, loss_value, batches = [], [], [], 0., 0
+def eval_model(model: torch.nn.Module, dataset: DataLoader, language: str, DATASET_MAX_SNT_LENGTH: int,
+               BATCH_MAX_SNT_LENGTH: int, evalb_path: str, type_: str)\
+        -> Tuple[joint_evaluate.JointFScore,
+                 Dict[str, List[Union[InternalTreebankNode, Set[Tuple[str, Tuple[int, int]]]]]]]:
+    trees_pred, trees_gold = [], []
     for insts in dataset:
         model.eval()
-        loss, tags_batch_pred = model(insts)
-        if loss.item() > 0:
-            loss_value += loss.item()
-        assert not isinstance(loss_value, torch.Tensor), 'GPU memory leak'
+        insts, _, max_len = batch_filter(insts, language, DATASET_MAX_SNT_LENGTH)
+        insts_list = batch_spliter(insts, max_len, BATCH_MAX_SNT_LENGTH)
+        for insts in insts_list:
+            trees_batch_pred, _ = model(insts)
+            trees_batch_gold = insts['gold_trees']
+            trees_pred.extend(trees_batch_pred)
+            trees_gold.extend(trees_batch_gold)
 
-        batches += len(tags_pred)
-        snts.extend(insts['snts'])
-        tags_batch_gold = insts['golds']
-        tags_pred.extend(vocab.decode(tags_batch_pred))
-        tags_gold.extend(tags_batch_gold)
-
-    assert len(tags_pred) == len(tags_gold)
-    fscore = ner_evaluate.cal_preformence(tags_pred, tags_gold)
-    loss_value = loss_value / batches
-    print('Model performance in %s dataset: loss: %.05f metric: %s' % (type_, loss_value, fscore))
+    assert len(trees_pred) == len(trees_gold)
+    joint_fscore, res_dict = joint_evaluate.cal_preformence(evalb_path, trees_gold, trees_pred)
+    print('Model performance in %s dataset: JointFScore: %s' % (type_, joint_fscore))
     torch.cuda.empty_cache()
-    return loss_value, fscore, {'snts': snts, 'pred_tags': tags_pred, 'gold_tags': tags_gold}
+    return joint_fscore, res_dict
 
 
 def main():
@@ -90,16 +88,35 @@ def main():
     args = preprocess()
 
     # ====== Loading dataset ====== #
-    train_data, dev_data, test_data, vocab = load_data(
+    train_data, dev_data, test_data, vocabs = load_data(
         args.input, args.batch_size, args.accum_steps, args.shuffle, args.num_workers, args.drop_last
     )
 
     # ======= Preparing Model ======= #
     print("\nModel Preparing starts...")
-    model = NERModel(
-                vocab,
+    model = CPModel(
+                vocabs,
                 # Embedding
+                args.subword,
+                args.use_pos_tag,
                 args.bert_path,
+                args.transliterate,
+                args.d_model,
+                args.partition,
+                args.pos_tag_emb_dropout,
+                args.position_emb_dropout,
+                args.bert_emb_dropout,
+                args.emb_dropout,
+                # Encoder
+                args.layer_num,
+                args.hidden_dropout,
+                args.attention_dropout,
+                args.dim_ff,
+                args.nhead,
+                args.kqv_dim,
+                # classifier
+                args.label_hidden,
+                args.language,
                 args.device
             ).to(args.device)
     # print(model, end='\n\n\n')
@@ -126,7 +143,7 @@ def main():
             insts_list = batch_spliter(insts, max_len, args.BATCH_MAX_SNT_LENGTH)
             total_batch_size += batch_size
             for insts in insts_list:
-                loss, _ = model(insts)
+                loss = model(insts)
                 if loss.item() > 0.:
                     loss.backward()
                     loss_value += loss.item()
@@ -146,35 +163,37 @@ def main():
                 visual_dic = {'loss/train': loss_value, 'lr': optimizer.get_lr()[0]}
                 if args.clip_grad:
                     visual_dic['norm'] = optimizer.get_dynamic_gard_norm()
-                args.visual_logger.visual_scalars(visual_dic, steps // args.accum_steps)
+                if not args.debug:
+                    args.visual_logger.visual_scalars(visual_dic, steps // args.accum_steps)
                 loss_value, total_batch_size = 0., 0
                 torch.cuda.empty_cache()
             if steps % (args.accum_steps * args.eval_interval) == 0:
                 if args.early_stop:
                     patience -= 1
-                print('model evaluating starts...')
-                loss_dev, fscore_dev, pred_dev = eval_model(model, dev_data, vocab, 'dev')
-                loss_test, fscore_test, pred_test = eval_model(model, test_data, vocab, 'test')
+                print('model evaluating starts...', flush=True)
+                joint_fscore_dev, res_data_dev = eval_model(
+                    model, dev_data, args.language, args.DATASET_MAX_SNT_LENGTH, args.BATCH_MAX_SNT_LENGTH,
+                    args.evalb_path, 'dev')
+                joint_fscore_test, res_data_test = eval_model(
+                    model, test_data, args.language, args.DATASET_MAX_SNT_LENGTH, args.BATCH_MAX_SNT_LENGTH,
+                    args.evalb_path, 'test')
                 visual_dic = {
-                    'F/dev': fscore_dev.fscore, 'loss/dev': loss_dev, 'F/test': fscore_test.fscore,
-                    'loss/test': loss_test
+                    'F/parsing_dev': joint_fscore_dev.parsing_f, 'F/parsing_test': joint_fscore_test.parsing_f,
+                    'F/ner_dev': joint_fscore_dev.ner_f, 'F/ner_test': joint_fscore_test.ner_f
                 }
-                args.visual_logger.visual_scalars(visual_dic, steps // args.accum_steps)
-                if best_dev is None or fscore_dev.fscore >= best_dev.fscore:
-                    best_dev, best_test = fscore_dev, fscore_test
-                    fitlog.add_best_metric({'f_dev': best_dev.fscore, 'f_test': best_test.fscore})
+                if not args.debug:
+                    args.visual_logger.visual_scalars(visual_dic, steps // args.accum_steps)
+                if best_dev is None or joint_fscore_dev.parsing_f > best_dev.parsing_f:
+                    best_dev, best_test = joint_fscore_dev, joint_fscore_test
+                    fitlog.add_best_metric({'parsing_f_dev': best_dev.parsing_f, 'ner_f_test': best_test.ner_f})
                     patience = args.patience * (len(train_data)//(args.accum_steps*args.eval_interval))
-                    write_ners(
-                        os.path.join(args.save_path, 'dev.pred.best.ners'),
-                        os.path.join(args.save_path, 'dev.gold.ners'), pred_dev)
-                    write_ners(
-                        os.path.join(args.save_path, 'test.pred.best.ners'),
-                        os.path.join(args.save_path, 'test.gold.ners'), pred_test)
+                    write_joint_data(args.save_path, res_data_dev, 'dev')
+                    write_joint_data(args.save_path, res_data_test, 'test')
                     if args.save:
                         torch.save(model.pack_state_dict(), os.path.join(args.save_path, args.name+'.best.model.pt'))
                 print('best performance:\ndev: %s\ntest: %s' % (best_dev, best_test))
                 print('model evaluating ends...', flush=True)
-                del pred_dev, pred_test
+                del res_data_dev, res_data_test
                 if args.debug:
                     exit(0)
             steps += 1

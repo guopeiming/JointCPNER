@@ -1,11 +1,12 @@
 # @Author : guopeiming
 # @Contact : guopeiming.gpm@{qq, gmail}.com
 import os
+from utils.ner_dataset import write_ners
 from torch.utils.data import Dataset, DataLoader
 from utils.vocabulary import Vocabulary
-from typing import List, Dict, Union, Tuple
-from utils.trees import InternalParseNode, load_trees
-from config.Constants import LANGS_NEED_SEG, DATASET_LIST, START, STOP, UNK, TAG_UNK, EMPTY_LABEL
+from typing import List, Dict, Union, Tuple, Set
+from utils.trees import InternalParseNode, InternalTreebankNode, load_trees, write_trees
+from config.Constants import LANGS_NEED_SEG, DATASET_LIST, START, STOP, TAG_UNK, EMPTY_LABEL
 
 
 class JointDataset(Dataset):
@@ -72,12 +73,13 @@ def batch_spliter(insts: Dict[str, List[Union[List[str], InternalParseNode]]], m
     return res
 
 
-def load_data(path: str, batch_size: int, shuffle: bool, num_workers: int, drop_last: bool)\
+def load_data(path: str, batch_size: int, accum_steps: int, shuffle: bool, num_workers: int, drop_last: bool)\
         -> Tuple[DataLoader, DataLoader, DataLoader, Dict[str, Vocabulary]]:
     """load the datasets.
     Args:
         path: path of input data.
         batch_size: the number of insts in a batch.
+        accum_steps: accumulation steps.
         shuffle: whether to shuffle the dataset.
         num_workers: the number of process to load data.
         drop_last: whether to drop the last data.
@@ -98,8 +100,8 @@ def load_data(path: str, batch_size: int, shuffle: bool, num_workers: int, drop_
 
         data_loader = DataLoader(
                         JointDataset(parse_trees),
-                        batch_size=batch_size,
-                        shuffle=shuffle if item == DATASET_LIST[0] else False,
+                        batch_size=batch_size if item == DATASET_LIST[0] else batch_size*accum_steps,
+                        shuffle=shuffle,
                         num_workers=num_workers,
                         collate_fn=aggregate_collate_fn,
                         drop_last=drop_last)
@@ -141,3 +143,46 @@ def vocabs_init(train_data: List[InternalParseNode]) -> Dict[str, Vocabulary]:
     print('len(pos_tags_vocab): %d\nlen(labels_vocab): %d' % (pos_tags_vocab.size, labels_vocab.size))
 
     return {'pos_tags': pos_tags_vocab, 'labels': labels_vocab}
+
+
+def write_joint_data(
+        path: str,
+        data_dict: Dict[str, List[Union[InternalTreebankNode, Set[Tuple[str, Tuple[int, int]]]]]],
+        type_: str
+):
+    assert len(data_dict['pred_trees']) == len(data_dict['gold_trees'])
+    assert len(data_dict['pred_ners']) == len(data_dict['gold_ners'])
+    assert len(data_dict['pred_ners']) == len(data_dict['pred_trees'])
+    write_trees(os.path.join(path, type_+'.pred.best.trees'), data_dict['pred_trees'],
+                os.path.join(path, type_+'.gold.trees'), data_dict['gold_trees'])
+
+    snts, ner_tags_pred, ner_tags_gold = [], [], []
+    for tree, ner_span_pred, ner_span_gold in \
+            zip(data_dict['gold_trees'], data_dict['pred_ners'], data_dict['gold_ners']):
+
+        leaves = list(tree.leaves())
+        snt = [leaf.word for leaf in leaves]
+        snts.append(snt)
+
+        ner_tag_pred = ['O' for _ in range(len(snt))]
+        for span in ner_span_pred:
+            span_label = span[0]
+            start, end = span[1]
+            ner_tag_pred[start] = 'B-' + span_label
+            for idx in range(start+1, end):
+                ner_tag_pred[idx] = 'I-' + span_label
+        ner_tags_pred.append(ner_tag_pred)
+
+        ner_tag_gold = ['O' for _ in range(len(snt))]
+        for span in ner_span_gold:
+            span_label = span[0]
+            start, end = span[1]
+            ner_tag_gold[start] = 'B-' + span_label
+            for idx in range(start+1, end):
+                ner_tag_gold[idx] = 'I-' + span_label
+        ner_tags_gold.append(ner_tag_gold)
+
+    write_ners(
+        os.path.join(path, type_+'.pred.best.ners'),
+        os.path.join(path, type_+'.gold.ners'),
+        {'snts': snts, 'pred_tags': ner_tags_pred, 'gold_tags': ner_tags_gold})

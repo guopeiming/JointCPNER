@@ -1,5 +1,6 @@
 import collections.abc
 import gzip
+from typing import List
 
 
 class TreebankNode(object):
@@ -313,7 +314,15 @@ def load_silver_trees(path, batch_size):
             batch = []
 
 
-def write_trees(path, trees_list):
-    with open(path, 'w', encoding='utf-8') as writer:
-        for tree in trees_list:
-            writer.write(tree.linearize()+'\n')
+def write_trees(
+    path_pred: str,
+    pred_list: List[InternalTreebankNode],
+    path_gold: str,
+    gold_list: List[InternalTreebankNode]
+):
+    with open(path_pred, 'w', encoding='utf-8') as writer_pred, open(path_gold, 'w', encoding='utf-8') as writer_gold:
+        assert len(pred_list) == len(gold_list)
+        for tree_pred, tree_gold in zip(pred_list, gold_list):
+            assert len(list(tree_pred.leaves())) == len(list(tree_gold.leaves()))
+            writer_pred.write(tree_pred.linearize()+'\n')
+            writer_gold.write(tree_gold.linearize()+'\n')

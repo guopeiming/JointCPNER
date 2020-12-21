@@ -7,16 +7,16 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Neural model for NLP')
 
     # [Data]
-    parser.add_argument('--input', type=str, default='./data/onto/parsing_char/', help='path of input data')
+    parser.add_argument('--input', type=str, default='./data/onto/joint/', help='path of input data')
     parser.add_argument('--language', type=str, choices=['chinese', 'arabic', 'english'], default='chinese', help='language')
 
     # [Train]
     parser.add_argument('--debug', default=False, type=bool, help='debug mode')
     parser.add_argument('--seed', default=2021, type=int, help='seed of random')
     parser.add_argument('--cuda', default=True, type=bool, help='whether to use cuda')
-    parser.add_argument('--gpuid', default=7, type=int, help='id of gpu')
-    parser.add_argument('--batch_size', default=16, type=int, help='how many insts per batch to load')
-    parser.add_argument('--accum_steps', default=1, type=int, help='the number of accumulated steps before backward')
+    parser.add_argument('--gpuid', default=4, type=int, help='id of gpu')
+    parser.add_argument('--batch_size', default=8, type=int, help='how many insts per batch to load')
+    parser.add_argument('--accum_steps', default=2, type=int, help='the number of accumulated steps before backward')
     parser.add_argument('--shuffle', default=True, type=bool, help='set True to get the data reshuffled at every epoch')
     parser.add_argument('--drop_last', default=False, type=bool, help='whether to drop the last data')
     parser.add_argument('--num_workers', default=4, type=int, help='how many subprocesses to use for data loading')
@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--lr_decay_factor', default=1.000001, type=float, help='decay factor of lr after warm up')
 
     # [Model]
-    parser.add_argument('--name', default='CPModel', type=str, help='name of model')
+    parser.add_argument('--name', default='JointModel', type=str, help='name of model')
     parser.add_argument('--subword', default='character_based', type=str, choices=['character_based', 'endpoint', 'startpoint', 'max_pool', 'avg_pool'], help='the method to represent word from BERT subword')
     # if language is chinese, when character-based, use_pos_tag should be False.
     parser.add_argument('--use_pos_tag', default=False, type=bool, help='whether to use pos_tag')
@@ -65,7 +65,7 @@ def parse_args() -> argparse.Namespace:
 
     # [Constants]
     parser.add_argument('--DATASET_MAX_SNT_LENGTH', default=240, type=str, help='when sentence length larger than it, drop it')
-    parser.add_argument('--BATCH_MAX_SNT_LENGTH', default=80, type=str, help='when sentence max len bigger than it, split batch to sub-batch')
+    parser.add_argument('--BATCH_MAX_SNT_LENGTH', default=100, type=str, help='when sentence max len bigger than it, split batch to sub-batch')
 
     args = parser.parse_args()
     return args

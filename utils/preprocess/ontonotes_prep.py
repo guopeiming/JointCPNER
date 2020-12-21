@@ -2,6 +2,10 @@ import os
 import re
 import glob
 import itertools
+from typing import Counter
+from utils.preprocess.trees import load_trees
+from utils.ner_dataset import load_data_from_file
+from utils.ner_evaluate import _bio_tag_to_spans
 
 
 def generate_collection_chinese(tag="train"):
@@ -203,8 +207,78 @@ def convert_ner_dataset():
     convert_ner_data('test')
 
 
+def match_ner_cp():
+    match_counter, conti_counter, not_match_counter = Counter(), Counter(), Counter()
+    match, conti_match, not_match = 0, 0, 0
+    trees = load_trees('./data/onto/parsing_char/train.corpus')
+    ner_snts, ner_golds = load_data_from_file('./data/onto/ner/train.corpus')
+    assert len(trees) == len(ner_snts)
+    with open('./not_mach.txt', 'w', encoding='utf-8') as writer:
+        for snt, ner_gold, tree in zip(ner_snts, ner_golds, trees):
+            snt, ner_gold = snt.split(), ner_gold.split()
+            assert len(list(tree.leaves())) == len(snt)
+            spans = _bio_tag_to_spans(ner_gold)
+            for span in spans:
+                match_type = tree.ner_match(span[1][0], span[1][1])
+                if match_type == 0:
+                    not_match += 1
+                    not_match_counter.update([span[0]])
+                    writer.write('\t'.join([span[0], ''.join(snt[span[1][0]:span[1][1]]), tree.linearize().replace('(', '[').replace(')', ']')+'\n']))
+                elif match_type == 1:
+                    match_counter.update([span[0]])
+                    match += 1
+                elif match_type == 2:
+                    conti_counter.update([span[0]])
+                    conti_match += 1
+                else:
+                    print('error')
+                    exit(-1)
+    print(match, conti_match, not_match, not_match/(not_match+match+conti_match))
+    print(match_counter)
+    print(conti_counter)
+    print(not_match_counter)
+
+
+def convert_joint_data(data: str):
+    root_dir = './data/onto'
+    dataset = data + '.corpus'
+    trees = load_trees(os.path.join(root_dir, 'parsing_char', dataset))
+    ner_snts, ner_golds = load_data_from_file(os.path.join(root_dir, 'ner', dataset))
+    match, conti_match, not_match = 0, 0, 0
+
+    with open(os.path.join(root_dir, 'joint', dataset), 'w', encoding='utf-8') as writer:
+        assert len(trees) == len(ner_snts)
+        for snt, ner_gold, tree in zip(ner_snts, ner_golds, trees):
+            snt, ner_gold = snt.split(), ner_gold.split()
+            assert len(list(tree.leaves())) == len(snt)
+            spans = _bio_tag_to_spans(ner_gold)
+
+            for span in spans:
+                match_type = tree.ner_match(span[1][0], span[1][1], change_laebl=True, span_label=span[0].upper())
+                if match_type == 0:
+                    not_match += 1
+                elif match_type == 1:
+                    match += 1
+                elif match_type == 2:
+                    conti_match += 1
+                else:
+                    print('error')
+                    exit(-1)
+            writer.write(tree.linearize() + '\n')
+
+    print(match, conti_match, not_match, not_match/(not_match+match+conti_match))
+
+
+def convert_joint_dataset():
+    convert_joint_data('train')
+    convert_joint_data('dev')
+    convert_joint_data('test')
+
+
 if __name__ == '__main__':
     # generate_onto_cropus()
     # convert_parsing_dataset_word()
     # convert_ner_dataset()
-    convert_parsing_dataset_char()
+    # convert_parsing_dataset_char()
+    # match_ner_cp()
+    convert_joint_dataset()

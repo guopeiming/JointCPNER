@@ -141,3 +141,6 @@ runs/
 .vscode/
 note.md
 *.out
+temp.txt
+ipython.py
+status

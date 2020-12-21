@@ -63,7 +63,7 @@ def postprocess(args: argparse.Namespace, start: float):
 @torch.no_grad()
 def eval_model(model: torch.nn.Module, dataset: DataLoader, language: str, DATASET_MAX_SNT_LENGTH: int,
                BATCH_MAX_SNT_LENGTH: int, evalb_path: str, type_: str)\
-        -> Tuple[evaluate.FScore, List[InternalTreebankNode]]:
+        -> Tuple[evaluate.FScore, List[InternalTreebankNode], List[InternalTreebankNode]]:
     trees_pred, trees_gold = [], []
     for insts in dataset:
         model.eval()
@@ -79,7 +79,7 @@ def eval_model(model: torch.nn.Module, dataset: DataLoader, language: str, DATAS
     eval_fscore = evaluate.evalb(evalb_path, trees_gold, trees_pred)
     print('Model performance in %s dataset: evalb: %s' % (type_, eval_fscore))
     torch.cuda.empty_cache()
-    return eval_fscore, trees_pred
+    return eval_fscore, trees_pred, trees_gold
 
 
 def main():
@@ -88,7 +88,7 @@ def main():
 
     # ====== Loading dataset ====== #
     train_data, dev_data, test_data, vocabs = load_data(
-        args.input, args.batch_size, args.shuffle, args.num_workers, args.drop_last
+        args.input, args.batch_size, args.accum_steps, args.shuffle, args.num_workers, args.drop_last
     )
 
     # ======= Preparing Model ======= #
@@ -169,10 +169,10 @@ def main():
                 if args.early_stop:
                     patience -= 1
                 print('model evaluating starts...', flush=True)
-                fscore_dev, pred_dev = eval_model(
+                fscore_dev, pred_dev, gold_dev = eval_model(
                     model, dev_data, args.language, args.DATASET_MAX_SNT_LENGTH, args.BATCH_MAX_SNT_LENGTH,
                     args.evalb_path, 'dev')
-                fscore_test, pred_test = eval_model(
+                fscore_test, pred_test, gold_test = eval_model(
                     model, test_data, args.language, args.DATASET_MAX_SNT_LENGTH, args.BATCH_MAX_SNT_LENGTH,
                     args.evalb_path, 'test')
                 visual_dic = {'F/dev': fscore_dev.fscore, 'F/test': fscore_test.fscore}
@@ -181,8 +181,10 @@ def main():
                     best_dev, best_test = fscore_dev, fscore_test
                     fitlog.add_best_metric({'f_dev': best_dev.fscore, 'f_test': best_test.fscore})
                     patience = args.patience * (len(train_data)//(args.accum_steps*args.eval_interval))
-                    write_trees(os.path.join(args.save_path, 'dev.best.trees'), pred_dev)
-                    write_trees(os.path.join(args.save_path, 'test.best.trees'), pred_test)
+                    write_trees(os.path.join(args.save_path, 'dev.pred.best.trees'), pred_dev,
+                                os.path.join(args.save_path, 'dev.gold.trees'), gold_dev)
+                    write_trees(os.path.join(args.save_path, 'test.pred.best.trees'), pred_test,
+                                os.path.join(args.save_path, 'test.gold.trees'), gold_test)
                     if args.save:
                         torch.save(model.pack_state_dict(), os.path.join(args.save_path, args.name+'.best.model.pt'))
                 print('best performance:\ndev:%s\ntest:%s' % (best_dev, best_test))
