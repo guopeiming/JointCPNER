@@ -6,7 +6,7 @@ from torch.utils.data import Dataset, DataLoader
 from utils.vocabulary import Vocabulary
 from typing import List, Dict, Union, Tuple, Set
 from utils.trees import InternalParseNode, InternalTreebankNode, load_trees, write_trees
-from config.Constants import LANGS_NEED_SEG, DATASET_LIST, START, STOP, TAG_UNK, EMPTY_LABEL
+from config.Constants import LANGS_NEED_SEG, DATASET_LIST, NER_LABELS, START, STOP, TAG_UNK, EMPTY_LABEL
 
 
 class JointDataset(Dataset):
@@ -186,3 +186,20 @@ def write_joint_data(
         os.path.join(path, type_+'.pred.best.ners'),
         os.path.join(path, type_+'.gold.ners'),
         {'snts': snts, 'pred_tags': ner_tags_pred, 'gold_tags': ner_tags_gold})
+
+
+def generate_cross_labels_idx(vocab: Vocabulary) -> Dict[str, Tuple[int]]:
+    cross_labels_idx: Dict[str, Tuple[int]] = dict()
+    for labels in vocab.indices:
+        for label in labels:
+            label_list: List[str] = label.split('-')
+            constitent, ner = '-'.join(label_list[:-1]), label_list[-1]
+            if ner.endswith('*'):
+                ner = ner[:-1]
+            if ner in NER_LABELS:
+                if ner not in cross_labels_idx.get(ner, tuple()):
+                    cross_labels_idx[ner] = cross_labels_idx.get(ner, tuple()) + (vocab.indices[labels], )
+                if constitent not in cross_labels_idx.get(constitent, tuple()):
+                    cross_labels_idx[constitent] = cross_labels_idx.get(constitent, tuple()) + (vocab.indices[labels], )
+    print('len(cross_labels_idx_dict):', len(cross_labels_idx))
+    return cross_labels_idx

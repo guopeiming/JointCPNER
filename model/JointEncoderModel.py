@@ -1,6 +1,7 @@
 # @Author : guopeiming
 # @Contact : guopeiming.gpm@{qq, gmail}.com
 import torch
+from queue import Queue
 import numpy as np
 import torch.nn as nn
 from utils import chart_helper
@@ -8,20 +9,20 @@ from utils import trees
 from utils.vocabulary import Vocabulary
 from utils.transliterate import TRANSLITERATIONS, BERT_TOKEN_MAPPING
 from typing import List, Dict, Union, Tuple
-from utils.trees import InternalParseNode
+from utils.trees import InternalParseNode, LeafParseNode
 from transformers import BertModel, BertTokenizerFast
 from config.Constants import STOP, START, TAG_UNK, PAD_STATEGY, TRUNCATION_STATEGY, CHARACTER_BASED
 from model.transformer import LearnedPositionalEmbedding, Transformer
 from model.partition_transformer import PartitionTransformer
 
 
-class CPModel(nn.Module):
-    def __init__(self, vocabs: Dict[str, Vocabulary], subword: str, use_pos_tag: bool, bert_path: str,
-                 transliterate: str, d_model: int, partition: bool, pos_tag_emb_dropout: float,
-                 position_emb_dropout: float, bert_emb_dropout: float, emb_dropout: float, layer_num: int,
-                 hidden_dropout: float, attention_dropout: float, dim_ff: int, nhead: int, kqv_dim: int,
-                 label_hidden: int, language: str, device: torch.device):
-        super(CPModel, self).__init__()
+class JointEncoderModel(nn.Module):
+    def __init__(self, vocabs: Dict[str, Vocabulary], cross_labels_idx: Dict[str, Tuple[int]], subword: str,
+                 use_pos_tag: bool, bert_path: str, transliterate: str, d_model: int, partition: bool,
+                 pos_tag_emb_dropout: float, position_emb_dropout: float, bert_emb_dropout: float, emb_dropout: float,
+                 layer_num: int, hidden_dropout: float, attention_dropout: float, dim_ff: int, nhead: int, kqv_dim: int,
+                 label_hidden: int, lambda_scaler: float, language: str, device: torch.device):
+        super(JointEncoderModel, self).__init__()
 
         self.embeddings = EmbeddingLayer(
             vocabs, subword, use_pos_tag, bert_path, transliterate, d_model, partition, pos_tag_emb_dropout,
@@ -36,8 +37,11 @@ class CPModel(nn.Module):
             nn.ReLU(),
             nn.Linear(label_hidden, vocabs['labels'].size-1)
         )
+        self.softmax = nn.Softmax(dim=-1)
         self.pos_tags_vocab = vocabs['pos_tags']
         self.labels_vocab = vocabs['labels']
+        self.cross_label_idx = cross_labels_idx
+        self.lambda_scaler = lambda_scaler
         self.device = device
 
     def forward(self, insts: Dict[str, List[Union[List[str], InternalParseNode]]], return_charts: bool = False)\
@@ -92,6 +96,7 @@ class CPModel(nn.Module):
         # Since this code is not undergoing algorithmic changes, it makes sense
         # to include the optimization even though it may only be a 10% speedup.
         # Note that no dropout occurs in the label portion of the network
+        cross_loss = torch.tensor(0.).to(self.device)
         golds = insts['gold_trees']
         p_is, p_js, g_is, g_js, p_labels, g_labels, batch_ids, paugment_total = [], [], [], [], [], [], [], 0.0
         for i, snt_len in enumerate(snts_len):
@@ -105,11 +110,51 @@ class CPModel(nn.Module):
             g_js.extend(g_j.tolist())
             g_labels.extend(g_label.tolist())
             batch_ids.extend([i for _ in range(len(p_i))])
+            # p_scores.append(torch.sum(chart[p_i.tolist(), p_j.tolist(), p_label.tolist()]).unsqueeze(0))
+            # g_scores.append(torch.sum(chart[g_i.tolist(), g_j.tolist(), g_label.tolist()]).unsqueeze(0))
+
+            # cross loss
+            cross_spans = self.generate_cross_label_spans(golds[i])
+            for constit, constit_gold, ner, ner_gold, span_start, span_end in cross_spans:
+                constit_idx = self.cross_label_idx[constit]
+                ner_idx = self.cross_label_idx[ner]
+                cross_constit_loss = self.softmax(charts[i, span_start, span_end, constit_idx])[constit_gold]
+                cross_ner_loss = self.softmax(charts[i, span_start, span_end, ner_idx])[ner_gold]
+                cross_loss = cross_loss - cross_constit_loss - cross_ner_loss
 
         p_scores = torch.sum(charts[batch_ids, p_is, p_js, p_labels])
         g_scores = torch.sum(charts[batch_ids, g_is, g_js, g_labels])
-        loss = p_scores - g_scores + paugment_total
+        loss = p_scores - g_scores + self.lambda_scaler*cross_loss + paugment_total
         return loss
+
+    def generate_cross_label_spans(self, tree: InternalParseNode) -> List[Tuple[str, int, str, int, int, int]]:
+        ner_spans = []
+        q = Queue()
+        q.put(tree)
+        while not q.empty():
+            tree = q.get()
+
+            # generate ner spans
+            for label in tree.label:
+                if label.endswith('*'):
+                    label_splited_list = label[:-1].split('-')
+                    constitent, ner = '-'.join(label_splited_list[:-1]), label_splited_list[-1]
+                    assert constitent in self.cross_label_idx and ner in self.cross_label_idx
+
+                    tree_label_idx = self.labels_vocab.index(tree.label)
+                    assert tree_label_idx in self.cross_label_idx[constitent]
+                    assert tree_label_idx in self.cross_label_idx[ner]
+
+                    constitent_gold = self.cross_label_idx[constitent].index(tree_label_idx)
+                    ner_gold = self.cross_label_idx[ner].index(tree_label_idx)
+                    ner_spans.append((constitent, constitent_gold, ner, ner_gold, tree.left, tree.right))
+
+            for child in tree.children:
+                assert isinstance(child, InternalParseNode) or isinstance(child, LeafParseNode)
+                if isinstance(child, InternalParseNode):
+                    q.put(child)
+
+        return ner_spans
 
     def parse_from_chart(self, snt_len: int, chart_np: np.ndarray, gold=None):
         decoder_args = dict(

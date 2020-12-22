@@ -10,7 +10,7 @@ import datetime
 import numpy as np
 from utils.optim import Optim
 from utils import joint_evaluate
-from model.JointModel import JointModel
+from model.JointEncoderModel import JointEncoderModel
 from torch.utils.data import DataLoader
 from config.joint_args import parse_args
 from utils.visual_logger import VisualLogger
@@ -95,7 +95,7 @@ def main():
 
     # ======= Preparing Model ======= #
     print("\nModel Preparing starts...")
-    model = JointModel(
+    model = JointEncoderModel(
                 vocabs,
                 cross_labels_idx,
                 # Embedding

@@ -12,7 +12,6 @@ def generate_collection_chinese(tag="train"):
     """generate corpus including ner and constituency parsing.
 
     notes:
-        we delete sentence that has only one words.
         we keep the first 15 characters if a word length larger than 15, which words all are URL link.
 
     notes:
@@ -27,15 +26,12 @@ def generate_collection_chinese(tag="train"):
     with open('./data/onto/'+tag+".corpus", 'w', encoding='utf-8') as writer:
         for cur_file in results:
             with open(cur_file, 'r', encoding='utf-8') as reader:
-                # print(cur_file)
+                print(cur_file)
                 flag = None
-                text = ''
                 for line in reader:
                     line = line.strip()
                     if len(line) == 0:
-                        if text.count('\n') > 1:
-                            writer.write(text + '\n')
-                        text = ''
+                        writer.write('\n')
                         continue
                     if line.startswith('#'):
                         continue
@@ -83,7 +79,7 @@ def generate_collection_chinese(tag="train"):
                             word = re.sub(r'\{.*\}', '', word)
                         else:
                             word = word
-                    text += "\t".join([word, pos, cons, ner]) + '\n'
+                    writer.write("\t".join([word, pos, cons, ner]) + '\n')
 
     # for cur_file in results:
     #     with open(cur_file, 'r', encoding='utf-8') as reader:
@@ -167,7 +163,7 @@ def convert_parsing_data_char(data: str):
             text = ''
             for char in word:
                 text += '(%s %s)' % ('PAD_TAG', char)
-            writer.write(cons.replace('*', '(%s%s)' % (pos, text)))
+            writer.write(cons.replace('*', '(%s %s)' % ('POSTAG-'+pos, text)))
 
 
 def convert_parsing_dataset_char():
@@ -176,11 +172,11 @@ def convert_parsing_dataset_char():
     convert_parsing_data_char('test')
 
 
-def convert_ner_data(data: str):
+def convert_ner_data_char(data: str):
     root_dir = './data/onto'
     dataset = data + '.corpus'
     with open(os.path.join(root_dir, dataset), 'r', encoding='utf-8') as reader, \
-         open(os.path.join(root_dir, 'ner', dataset), 'w', encoding='utf-8') as writer:
+         open(os.path.join(root_dir, 'ner_char', dataset), 'w', encoding='utf-8') as writer:
         for line in reader:
             line = line.strip()
             if len(line) == 0:
@@ -201,10 +197,10 @@ def convert_ner_data(data: str):
                 exit(-1)
 
 
-def convert_ner_dataset():
-    convert_ner_data('train')
-    convert_ner_data('dev')
-    convert_ner_data('test')
+def convert_ner_dataset_char():
+    convert_ner_data_char('train')
+    convert_ner_data_char('dev')
+    convert_ner_data_char('test')
 
 
 def match_ner_cp():
@@ -239,14 +235,14 @@ def match_ner_cp():
     print(not_match_counter)
 
 
-def convert_joint_data(data: str):
+def convert_joint_data_char(data: str, up: bool):
     root_dir = './data/onto'
     dataset = data + '.corpus'
     trees = load_trees(os.path.join(root_dir, 'parsing_char', dataset))
-    ner_snts, ner_golds = load_data_from_file(os.path.join(root_dir, 'ner', dataset))
+    ner_snts, ner_golds = load_data_from_file(os.path.join(root_dir, 'ner_char', dataset))
     match, conti_match, not_match = 0, 0, 0
 
-    with open(os.path.join(root_dir, 'joint', dataset), 'w', encoding='utf-8') as writer:
+    with open(os.path.join(root_dir, 'temp', dataset), 'w', encoding='utf-8') as writer:
         assert len(trees) == len(ner_snts)
         for snt, ner_gold, tree in zip(ner_snts, ner_golds, trees):
             snt, ner_gold = snt.split(), ner_gold.split()
@@ -254,7 +250,7 @@ def convert_joint_data(data: str):
             spans = _bio_tag_to_spans(ner_gold)
 
             for span in spans:
-                match_type = tree.ner_match(span[1][0], span[1][1], change_laebl=True, span_label=span[0].upper())
+                match_type = tree.ner_match(span[1][0], span[1][1], up, change_label=True, span_label=span[0].upper())
                 if match_type == 0:
                     not_match += 1
                 elif match_type == 1:
@@ -269,16 +265,16 @@ def convert_joint_data(data: str):
     print(match, conti_match, not_match, not_match/(not_match+match+conti_match))
 
 
-def convert_joint_dataset():
-    convert_joint_data('train')
-    convert_joint_data('dev')
-    convert_joint_data('test')
+def convert_joint_dataset_char():
+    convert_joint_data_char('train', False)
+    convert_joint_data_char('dev', False)
+    convert_joint_data_char('test', False)
 
 
 if __name__ == '__main__':
     # generate_onto_cropus()
     # convert_parsing_dataset_word()
-    # convert_ner_dataset()
+    # convert_ner_dataset_char()
     # convert_parsing_dataset_char()
     # match_ner_cp()
-    convert_joint_dataset()
+    convert_joint_dataset_char()

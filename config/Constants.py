@@ -11,6 +11,27 @@ DATASET_MAX_SNT_LENGTH = 300  # when sentence length larger than it, drop it
 
 DATASET_LIST = ('train', 'dev', 'test')  # train/dev/test list, warning: the order of the list.
 
+NER_LABELS = (
+    'CARDINAL',
+    'DATE',
+    'EVENT',
+    'FAC',
+    'GPE',
+    'LANGUAGE',
+    'LAW',
+    'LOC',
+    'MONEY',
+    'NORP',
+    'ORDINAL',
+    'ORG',
+    'PERCENT',
+    'PERSON',
+    'PRODUCT',
+    'QUANTITY',
+    'TIME',
+    'WORK_OF_ART'
+)
+
 START = "<START>"
 STOP = "<STOP>"
 UNK = "<UNK>"

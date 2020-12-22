@@ -11,8 +11,8 @@ import numpy as np
 from utils import evaluate
 from utils.optim import Optim
 from typing import Tuple, List
-from model.CPModel import CPModel
 from config.cp_args import parse_args
+from model.CPModel import CPModel
 from torch.utils.data import DataLoader
 from utils.visual_logger import VisualLogger
 from utils.trees import write_trees, InternalTreebankNode

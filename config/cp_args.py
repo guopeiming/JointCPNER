@@ -14,7 +14,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--debug', default=False, type=bool, help='debug mode')
     parser.add_argument('--seed', default=2021, type=int, help='seed of random')
     parser.add_argument('--cuda', default=True, type=bool, help='whether to use cuda')
-    parser.add_argument('--gpuid', default=7, type=int, help='id of gpu')
+    parser.add_argument('--gpuid', default=1, type=int, help='id of gpu')
     parser.add_argument('--batch_size', default=16, type=int, help='how many insts per batch to load')
     parser.add_argument('--accum_steps', default=1, type=int, help='the number of accumulated steps before backward')
     parser.add_argument('--shuffle', default=True, type=bool, help='set True to get the data reshuffled at every epoch')
@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     # [Optimizer]
     parser.add_argument('--optim', default='Adam', type=str, help='optimizer used')
     parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
-    parser.add_argument('--lr_fine_tune', default=0.00003, type=float, help='fine tune learning rate')
+    parser.add_argument('--lr_fine_tune', default=0.00002, type=float, help='fine tune learning rate')
     parser.add_argument('--weight_decay', default=1e-2, type=float, help='lambda')
     parser.add_argument('--clip_grad', default=False, type=bool, help='whether to ues util.clip')
     parser.add_argument('--clip_grad_max_norm', default=4.0, type=float, help='clip_grad_max_norm')

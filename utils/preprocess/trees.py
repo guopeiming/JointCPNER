@@ -1,6 +1,7 @@
 # @Author : guopeiming
 # @Contact : guopeiming.gpm@{qq, gmail}.com
 from typing import Union, List
+import collections.abc
 
 
 class Tree(object):
@@ -24,6 +25,8 @@ class Tree(object):
         if self.is_leaf:
             self.word: str = children_or_word
         else:
+            assert isinstance(children_or_word, collections.abc.Sequence)
+            assert all(isinstance(child, Tree) for child in children_or_word)
             self.children: List[Tree] = children_or_word
 
         self.left = span_start_idx
@@ -33,7 +36,7 @@ class Tree(object):
             assert all(left.right == right.left for left, right in zip(self.children, self.children[1:]))
             assert self.left == self.children[0].left and self.right == self.children[-1].right
 
-    def ner_match(self, start: int, end: int, change_laebl: bool = False, span_label: str = None) -> int:
+    def ner_match(self, start: int, end: int, up: bool, change_label: bool = False, span_label: str = None) -> int:
         """identify type of matching between ner and constitent label.
         Args:
             start and end: span idx [start, end)
@@ -44,25 +47,38 @@ class Tree(object):
             2: match continuous label
         """
         assert self.left <= start < end <= self.right
-        if change_laebl:
+        if change_label:
             assert span_label is not None
 
-        # [start, end) match a span exactly
-        if self.left == start and self.right == end:
-            assert not self.is_leaf
-            if change_laebl:
-                self.change_label(span_label)
-                self.label = self.label + '*'
-            return 1
+        if up:
+            # [start, end) match a span exactly
+            if self.left == start and self.right == end:
+                assert not self.is_leaf
+                if change_label:
+                    self.change_label(span_label)
+                    self.label = self.label + '*'
+                return 1
 
-        # [start, end) in a subtree
-        if not self.is_leaf:
+            # [start, end) in a subtree
             for child in self.children:
-                if child.left <= start < end <= child.right:
-                    return child.ner_match(start, end, change_laebl, span_label)
+                if child.left <= start < end <= child.right and (not child.is_leaf):
+                    return child.ner_match(start, end, up, change_label, span_label)
+        else:
+            # [start, end) in a subtree
+            for child in self.children:
+                if child.left <= start < end <= child.right and (not child.is_leaf):
+                    return child.ner_match(start, end, up, change_label, span_label)
+
+            # [start, end) match a span exactly
+            if self.left == start and self.right == end:
+                assert not self.is_leaf
+                if change_label:
+                    self.change_label(span_label)
+                    self.label = self.label + '*'
+                return 1
 
         # because self.left <= start < end <= self.right, if self is a leaf
-        # node, it must match [start, end) and return False in the code above.
+        # node, it must match [start, end) and return 1 in the code above.
         assert not self.is_leaf
         # [start, end) match contiguous children.
         start_match_flag, end_match_flag = False, False
@@ -75,7 +91,7 @@ class Tree(object):
                 end_match_flag = True
                 end_subtree_idx = subtree_idx
         if start_match_flag and end_match_flag:
-            if change_laebl:
+            if change_label:
 
                 subtrees_left = self.children[0:start_subtree_idx]
                 subtrees_right = self.children[end_subtree_idx+1:]
@@ -93,7 +109,7 @@ class Tree(object):
 
     def change_label(self, span_label: str):
         if not self.is_leaf:
-            assert '-' not in self.label
+            assert '-' not in self.label or ('POSTAG' in self.label and self.label.count('-') == 1)
             self.label = self.label + '-' + span_label
             for child in self.children:
                 child.change_label(span_label)

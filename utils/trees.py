@@ -229,31 +229,16 @@ def load_trees(path, strip_top=True, strip_spmrl_features=True):
     trees, index = helper(0)
     assert index == len(tokens)
 
-    # XXX(nikita): this behavior should really be controlled by an argument
-    if 'German' in path:
-        # Utterances where the root is a terminal symbol break our parser's
-        # assumptions, so insert a dummy root node.
-        for i, tree in enumerate(trees):
-            if isinstance(tree, LeafTreebankNode):
-                trees[i] = InternalTreebankNode("VROOT", [tree])
-
-    # ================guopeiming deleteing=============
     if strip_top:
         for i, tree in enumerate(trees):
             if tree.label in ("TOP", "ROOT"):
                 assert len(tree.children) == 1
                 trees[i] = tree.children[0]
-    # =================guopeiming adding===============
-    # if strip_top:
-    #     num = 0
-    #     for i, tree in enumerate(trees):
-    #         if tree.label in ("TOP", "ROOT"):
-    #             if len(tree.children) == 1:
-    #                 trees[i] = tree.children[0]
-    #             else:
-    #                 num += 1
-    #     print('bad cases num: %d' % num)
-    # =================guopeiming alter ending=========
+
+    for i, tree in enumerate(trees):
+        if isinstance(tree, LeafTreebankNode):
+            trees[i] = InternalTreebankNode("VROOT", [tree])
+
     return trees
 
 

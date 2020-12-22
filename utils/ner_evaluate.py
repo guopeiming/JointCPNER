@@ -7,21 +7,24 @@ class NERFScore(object):
     def __init__(self, true_positive: int, false_positive: int, false_negetive: int):
         super(NERFScore, self).__init__()
 
-        if true_positive+false_negetive == 0:
-            self.recall = true_positive/(true_positive+false_negetive+1)
-        else:
-            self.recall = true_positive/(true_positive+false_negetive)
-        if true_positive+false_positive == 0:
-            self.precision = true_positive/(true_positive+false_positive+1)
-        else:
-            self.precision = true_positive/(true_positive+false_positive)
-        if self.recall+self.precision == 0:
-            self.fscore = (2*self.recall*self.precision)/(self.recall+self.precision+1)
-        else:
-            self.fscore = (2*self.recall*self.precision)/(self.recall+self.precision)
+        recall = 0.
+        if true_positive+false_negetive != 0:
+            recall = true_positive/(true_positive+false_negetive)
+
+        precision = 0.
+        if true_positive+false_positive != 0:
+            precision = true_positive/(true_positive+false_positive)
+
+        fscore = 0.
+        if recall+precision != 0:
+            fscore = (2*recall*precision)/(recall+precision)
+
+        self.recall = recall * 100
+        self.precision = precision * 100
+        self.fscore = fscore * 100
 
     def __str__(self):
-        return 'P: %.05f, R: %.05f, F1: %.05f' % (self.precision, self.recall, self.fscore)
+        return 'P: %.02f, R: %.02f, F1: %.02f' % (self.precision, self.recall, self.fscore)
 
 
 def _bio_tag_to_spans(tags: List[str], ignore_labels=None) -> Set[Tuple[str, Tuple[int, int]]]:
