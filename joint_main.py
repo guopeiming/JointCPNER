@@ -44,9 +44,8 @@ def preprocess() -> argparse.Namespace:
     # ====== tb VisualLogger init ====== #
     args.visual_logger = VisualLogger(args.save_path) if not args.debug else None
     # ====== cuda enable ====== #
-    args.device = \
-        torch.device('cuda:'+str(args.gpuid)) if args.cuda and torch.cuda.is_available() else torch.device('cpu')
-    torch.cuda.set_device(args.gpuid)
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpuid)
+    args.device = torch.device('cuda') if args.cuda and torch.cuda.is_available() else torch.device('cpu')
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
     print(args, end='\n\n')
     return args

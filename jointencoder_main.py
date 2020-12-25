@@ -12,11 +12,11 @@ from utils.optim import Optim
 from utils import joint_evaluate
 from model.JointEncoderModel import JointEncoderModel
 from torch.utils.data import DataLoader
-from config.joint_args import parse_args
+from config.jointencoder_args import parse_args
 from utils.visual_logger import VisualLogger
 from utils.trees import InternalTreebankNode
 from typing import Tuple, List, Set, Union, Dict
-from utils.joint_dataset import generate_cross_labels_idx, load_data, batch_filter, batch_spliter, write_joint_data
+from utils.jointencoder_dataset import load_data, batch_filter, batch_spliter, write_joint_data
 
 
 def preprocess() -> argparse.Namespace:
@@ -44,9 +44,8 @@ def preprocess() -> argparse.Namespace:
     # ====== tb VisualLogger init ====== #
     args.visual_logger = VisualLogger(args.save_path) if not args.debug else None
     # ====== cuda enable ====== #
-    args.device = \
-        torch.device('cuda:'+str(args.gpuid)) if args.cuda and torch.cuda.is_available() else torch.device('cpu')
-    torch.cuda.set_device(args.gpuid)
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpuid)
+    args.device = torch.device('cuda') if args.cuda and torch.cuda.is_available() else torch.device('cpu')
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
     print(args, end='\n\n')
     return args
@@ -72,7 +71,7 @@ def eval_model(model: torch.nn.Module, dataset: DataLoader, language: str, DATAS
         insts_list = batch_spliter(insts, max_len, BATCH_MAX_SNT_LENGTH)
         for insts in insts_list:
             trees_batch_pred, _ = model(insts)
-            trees_batch_gold = insts['gold_trees']
+            trees_batch_gold = insts['joint_gold_trees']
             trees_pred.extend(trees_batch_pred)
             trees_gold.extend(trees_batch_gold)
 
@@ -88,16 +87,18 @@ def main():
     args = preprocess()
 
     # ====== Loading dataset ====== #
-    train_data, dev_data, test_data, vocabs = load_data(
-        args.input, args.batch_size, args.accum_steps, args.shuffle, args.num_workers, args.drop_last
+    train_data, dev_data, test_data, joint_vocabs, parsing_vocabs = load_data(
+        args.joint_input, args.parsing_input, args.batch_size, args.accum_steps, args.shuffle, args.num_workers,
+        args.drop_last
     )
-    cross_labels_idx = generate_cross_labels_idx(vocabs['labels'])
+    # cross_labels_idx = generate_cross_labels_idx(vocabs['labels'])
 
     # ======= Preparing Model ======= #
     print("\nModel Preparing starts...")
     model = JointEncoderModel(
-                vocabs,
-                cross_labels_idx,
+                joint_vocabs,
+                parsing_vocabs,
+                # cross_labels_idx,
                 # Embedding
                 args.subword,
                 args.use_pos_tag,
@@ -120,9 +121,10 @@ def main():
                 args.label_hidden,
                 # loss
                 args.lambda_scaler,
+                args.alpha_scaler,
                 args.language,
                 args.device
-            ).to(args.device)
+            ).cuda()
     # print(model, end='\n\n\n')
     optimizer = Optim(model, args.optim, args.lr, args.lr_fine_tune, args.warmup_steps, args.lr_decay_factor,
                       args.weight_decay, args.clip_grad, args.clip_grad_max_norm)

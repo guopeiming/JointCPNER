@@ -31,7 +31,7 @@ class SinusoidalPositionalEmbedding(nn.Module):
         :param offset:
         """
         # [seq_len, embedding_dim//2]
-        emb = torch.arange(offset, seq_len+offset, step=1).unsqueeze(1).to(self.emb.device) * self.emb
+        emb = torch.arange(offset, seq_len+offset, step=1, device=self.emb.device).unsqueeze(1) * self.emb
         emb = torch.cat([torch.sin(emb), torch.cos(emb)], 1)  # [seq_len, embedding_dim]
 
         # zero pad
@@ -66,7 +66,8 @@ class LearnedPositionalEmbedding(nn.Module):
         :param seq_len:
         :param offset:
         """
-        positions = torch.add(torch.arange(seq_len, dtype=torch.long).to(self.embs.weight.device), offset)  # [seq_len]
+        # [seq_len]
+        positions = torch.add(torch.arange(seq_len, dtype=torch.long, device=self.embs.weight.device), offset)
         emb = self.embs(positions)
         return emb.unsqueeze(0)  # [1, seq_len, embedding_dim]
 
@@ -325,7 +326,6 @@ class Transformer(nn.Module):
         Arguments:
             attention_mask: torch.Tensor with 1 indicating tokens to ATTEND to
             input_shape: tuple, shape of input_ids
-            device: torch.Device, usually self.device
 
         Returns:
             torch.Tensor with dtype of attention_mask.dtype

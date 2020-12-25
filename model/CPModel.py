@@ -58,7 +58,7 @@ class CPModel(nn.Module):
         spans_repr = words_repr.unsqueeze(1) - words_repr.unsqueeze(2)  # [batch_size, seq_len+1, seq_len+1, dim]
         assert (batch_size, seq_len+1, seq_len+1) == spans_repr.shape[0:3]
         labels_score = self.label_classifier(spans_repr)
-        charts = torch.cat([torch.zeros((batch_size, seq_len+1, seq_len+1, 1)).to(self.device), labels_score], dim=3)
+        charts = torch.cat([torch.zeros((batch_size, seq_len+1, seq_len+1, 1), device=self.device), labels_score], dim=3)
         charts_np = charts.cpu().detach().numpy()
 
         # compute loss and generate tree
@@ -304,10 +304,10 @@ class EmbeddingLayer(nn.Module):
                 offsets.append(offset)
 
         return (
-            torch.tensor(ids, dtype=torch.long).to(self.device),
-            torch.tensor(pos_tags_ids, dtype=torch.long).to(self.device) if self.use_pos_tag else None,
-            torch.tensor(attention_mask, dtype=torch.int).to(self.device),
-            torch.tensor(snts_mask, dtype=torch.int).to(self.device),
+            torch.tensor(ids, dtype=torch.long, device=self.device),
+            torch.tensor(pos_tags_ids, dtype=torch.long, device=self.device) if self.use_pos_tag else None,
+            torch.tensor(attention_mask, dtype=torch.int, device=self.device),
+            torch.tensor(snts_mask, dtype=torch.int, device=self.device),
             offsets
         )
 
@@ -368,7 +368,7 @@ class EmbeddingLayer(nn.Module):
                 words_repr_list = torch.split(snt_bert_embeddings, words_length, dim=0)
                 words_repr = torch.cat([
                     self.pool(word_repr.permute(1, 0)).permute(1, 0) for word_repr in words_repr_list] +
-                    [torch.zeros(seq_len-len(words_repr_list), self.bert_hidden_size).to(self.device)], dim=0)
+                    [torch.zeros(seq_len-len(words_repr_list), self.bert_hidden_size, device=self.device)], dim=0)
                 bert_embeddings_list.append(words_repr.unsqueeze(0))
             bert_embeddings = torch.cat(bert_embeddings_list, dim=0)
         else:

@@ -38,7 +38,7 @@ class NERModel(nn.Module):
             labels = torch.tensor([
                 label + [self.vocab.encode('O')]*(seq_len-len(label))
                 for label in labels
-            ]).to(self.device)
+            ], device=self.device)
         crf_dict = self.crf(self.bert_proj(bert_embeddings), masks[:, 2:], labels)
 
         return crf_dict['loss'], crf_dict['predicted_tags']
@@ -58,8 +58,8 @@ class NERModel(nn.Module):
             assert sum(mask) == snt_len+2
 
         return (
-            torch.tensor(ids, dtype=torch.long).to(self.device),
-            torch.tensor(attention_mask, dtype=torch.long).to(self.device),
+            torch.tensor(ids, dtype=torch.long, device=self.device),
+            torch.tensor(attention_mask, dtype=torch.long, device=self.device),
             batch_size, seq_len
         )
 

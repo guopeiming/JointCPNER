@@ -8,7 +8,7 @@ import random
 import argparse
 import datetime
 import numpy as np
-from utils import evaluate
+from utils import cp_evaluate
 from utils.optim import Optim
 from typing import Tuple, List
 from config.cp_args import parse_args
@@ -44,9 +44,8 @@ def preprocess() -> argparse.Namespace:
     # ====== tb VisualLogger init ====== #
     args.visual_logger = VisualLogger(args.save_path) if not args.debug else None
     # ====== cuda enable ====== #
-    args.device = \
-        torch.device('cuda:'+str(args.gpuid)) if args.cuda and torch.cuda.is_available() else torch.device('cpu')
-    torch.cuda.set_device(args.gpuid)
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpuid)
+    args.device = torch.device('cuda') if args.cuda and torch.cuda.is_available() else torch.device('cpu')
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
     print(args, end='\n\n')
     return args
@@ -63,7 +62,7 @@ def postprocess(args: argparse.Namespace, start: float):
 @torch.no_grad()
 def eval_model(model: torch.nn.Module, dataset: DataLoader, language: str, DATASET_MAX_SNT_LENGTH: int,
                BATCH_MAX_SNT_LENGTH: int, evalb_path: str, type_: str)\
-        -> Tuple[evaluate.FScore, List[InternalTreebankNode], List[InternalTreebankNode]]:
+        -> Tuple[cp_evaluate.JointFScore, List[InternalTreebankNode], List[InternalTreebankNode]]:
     trees_pred, trees_gold = [], []
     for insts in dataset:
         model.eval()
@@ -72,14 +71,14 @@ def eval_model(model: torch.nn.Module, dataset: DataLoader, language: str, DATAS
         for insts in insts_list:
             trees_batch_pred, _ = model(insts)
             trees_batch_gold = insts['gold_trees']
-            trees_pred.extend([tree.convert() for tree in trees_batch_pred])
-            trees_gold.extend([tree.convert() for tree in trees_batch_gold])
+            trees_pred.extend(trees_batch_pred)
+            trees_gold.extend(trees_batch_gold)
 
     assert len(trees_pred) == len(trees_gold)
-    eval_fscore = evaluate.evalb(evalb_path, trees_gold, trees_pred)
-    print('Model performance in %s dataset: evalb: %s' % (type_, eval_fscore))
+    eval_fscore, res_dict = cp_evaluate.cal_preformence(evalb_path, trees_gold, trees_pred)
+    print('Model performance in %s dataset: JointScore: %s' % (type_, eval_fscore))
     torch.cuda.empty_cache()
-    return eval_fscore, trees_pred, trees_gold
+    return eval_fscore, res_dict['pred_trees'], res_dict['gold_trees']
 
 
 def main():
@@ -117,7 +116,7 @@ def main():
                 args.label_hidden,
                 args.language,
                 args.device
-            ).to(args.device)
+            ).cuda()
     # print(model, end='\n\n\n')
     optimizer = Optim(model, args.optim, args.lr, args.lr_fine_tune, args.warmup_steps, args.lr_decay_factor,
                       args.weight_decay, args.clip_grad, args.clip_grad_max_norm)
@@ -175,11 +174,12 @@ def main():
                 fscore_test, pred_test, gold_test = eval_model(
                     model, test_data, args.language, args.DATASET_MAX_SNT_LENGTH, args.BATCH_MAX_SNT_LENGTH,
                     args.evalb_path, 'test')
-                visual_dic = {'F/dev': fscore_dev.fscore, 'F/test': fscore_test.fscore}
-                args.visual_logger.visual_scalars(visual_dic, steps // args.accum_steps)
-                if best_dev is None or fscore_dev.fscore > best_dev.fscore:
+                visual_dic = {'F/parsing_dev': fscore_dev.parsing_f, 'F/parsing_test': fscore_test.parsing_f}
+                if not args.debug:
+                    args.visual_logger.visual_scalars(visual_dic, steps // args.accum_steps)
+                if best_dev is None or fscore_dev.parsing_f > best_dev.parsing_f:
                     best_dev, best_test = fscore_dev, fscore_test
-                    fitlog.add_best_metric({'f_dev': best_dev.fscore, 'f_test': best_test.fscore})
+                    fitlog.add_best_metric({'f_dev': best_dev.parsing_f, 'f_test': best_test.parsing_f})
                     patience = args.patience * (len(train_data)//(args.accum_steps*args.eval_interval))
                     write_trees(os.path.join(args.save_path, 'dev.pred.best.trees'), pred_dev,
                                 os.path.join(args.save_path, 'dev.gold.trees'), gold_dev)
@@ -189,7 +189,7 @@ def main():
                         torch.save(model.pack_state_dict(), os.path.join(args.save_path, args.name+'.best.model.pt'))
                 print('best performance:\ndev:%s\ntest:%s' % (best_dev, best_test))
                 print('model evaluating ends...', flush=True)
-                del pred_dev, pred_test
+                del pred_dev, gold_dev, pred_test, gold_test
                 if args.debug:
                     exit(0)
             steps += 1

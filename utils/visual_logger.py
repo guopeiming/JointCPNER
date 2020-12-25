@@ -1,5 +1,6 @@
 # @Author : guopeiming
 # @Contact : guopeiming.gpm@{qq, gmail}.com
+import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -11,7 +12,7 @@ class VisualLogger:
         for tag in dic:
             self.writer.add_scalar(tag, dic[tag], step)
 
-    def visual_histogram(self, model, step):
+    def visual_histogram(self, model: nn.Module, step):
         for tag, values in model.named_parameters():
             tag = tag.replace('.', '/')
             self.writer.add_histogram(tag, values, step)

@@ -7,16 +7,17 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Neural model for NLP')
 
     # [Data]
-    parser.add_argument('--input', type=str, default='./data/onto/parsing_char/', help='path of input data')
+    parser.add_argument('--joint_input', type=str, default='./data/onto/joint_down/', help='path of input data')
+    parser.add_argument('--parsing_input', type=str, default='./data/onto/parsing_char/', help='path of input data')
     parser.add_argument('--language', type=str, choices=['chinese', 'arabic', 'english'], default='chinese', help='language')
 
     # [Train]
     parser.add_argument('--debug', default=False, type=bool, help='debug mode')
     parser.add_argument('--seed', default=2021, type=int, help='seed of random')
     parser.add_argument('--cuda', default=True, type=bool, help='whether to use cuda')
-    parser.add_argument('--gpuid', default=2, type=int, help='id of gpu')
-    parser.add_argument('--batch_size', default=16, type=int, help='how many insts per batch to load')
-    parser.add_argument('--accum_steps', default=1, type=int, help='the number of accumulated steps before backward')
+    parser.add_argument('--gpuid', default=0, type=int, help='id of gpu')
+    parser.add_argument('--batch_size', default=4, type=int, help='how many insts per batch to load')
+    parser.add_argument('--accum_steps', default=4, type=int, help='the number of accumulated steps before backward')
     parser.add_argument('--shuffle', default=True, type=bool, help='set True to get the data reshuffled at every epoch')
     parser.add_argument('--drop_last', default=False, type=bool, help='whether to drop the last data')
     parser.add_argument('--num_workers', default=4, type=int, help='how many subprocesses to use for data loading')
@@ -38,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--lr_decay_factor', default=1.000001, type=float, help='decay factor of lr after warm up')
 
     # [Model]
-    parser.add_argument('--name', default='CPModel', type=str, help='name of model')
+    parser.add_argument('--name', default='JointModel', type=str, help='name of model')
     parser.add_argument('--subword', default='character_based', type=str, choices=['character_based', 'endpoint', 'startpoint', 'max_pool', 'avg_pool'], help='the method to represent word from BERT subword')
     # if language is chinese, when character-based, use_pos_tag should be False.
     parser.add_argument('--use_pos_tag', default=False, type=bool, help='whether to use pos_tag')
@@ -59,7 +60,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--nhead', default=8, type=int, help='head number')
     parser.add_argument('--kqv_dim', default=64, type=int, help='dimention of kqv')
     # [Model-classifier]
-    parser.add_argument('--label_hidden', default=800, type=int, help='dimention of label_hidden')
+    parser.add_argument('--label_hidden', default=1250, type=int, help='dimention of label_hidden')
+
+    # [Loss]
+    parser.add_argument('--lambda_scaler', default=0.3, type=float, help='cross loss scaler')
+    parser.add_argument('--alpha_scaler', default=0.6, type=float, help='cross loss scaler')
+
     # [Evaluation]
     parser.add_argument('--evalb_path', default='./EVALB_SPMRL/', type=str, help='path of evaluation script')
 

@@ -11,37 +11,56 @@ from utils.transliterate import TRANSLITERATIONS, BERT_TOKEN_MAPPING
 from typing import List, Dict, Union, Tuple
 from utils.trees import InternalParseNode, LeafParseNode
 from transformers import BertModel, BertTokenizerFast
-from config.Constants import STOP, START, TAG_UNK, PAD_STATEGY, TRUNCATION_STATEGY, CHARACTER_BASED
+from config.Constants import NER_LABELS, STOP, START, TAG_UNK, PAD_STATEGY, TRUNCATION_STATEGY, CHARACTER_BASED
 from model.transformer import LearnedPositionalEmbedding, Transformer
 from model.partition_transformer import PartitionTransformer
 
 
 class JointEncoderModel(nn.Module):
-    def __init__(self, vocabs: Dict[str, Vocabulary], cross_labels_idx: Dict[str, Tuple[int]], subword: str,
-                 use_pos_tag: bool, bert_path: str, transliterate: str, d_model: int, partition: bool,
-                 pos_tag_emb_dropout: float, position_emb_dropout: float, bert_emb_dropout: float, emb_dropout: float,
-                 layer_num: int, hidden_dropout: float, attention_dropout: float, dim_ff: int, nhead: int, kqv_dim: int,
-                 label_hidden: int, lambda_scaler: float, language: str, device: torch.device):
+    def __init__(self, joint_vocabs: Dict[str, Vocabulary], parsing_vocabs: Dict[str, Vocabulary],
+                 #  cross_labels_idx: Dict[str, Tuple[int]],
+                 subword: str, use_pos_tag: bool, bert_path: str,
+                 transliterate: str, d_model: int, partition: bool, pos_tag_emb_dropout: float,
+                 position_emb_dropout: float, bert_emb_dropout: float, emb_dropout: float, layer_num: int,
+                 hidden_dropout: float, attention_dropout: float, dim_ff: int, nhead: int, kqv_dim: int,
+                 label_hidden: int, lambda_scaler: float, alpha_scaler: float, language: str, device: torch.device):
         super(JointEncoderModel, self).__init__()
 
         self.embeddings = EmbeddingLayer(
-            vocabs, subword, use_pos_tag, bert_path, transliterate, d_model, partition, pos_tag_emb_dropout,
+            joint_vocabs, subword, use_pos_tag, bert_path, transliterate, d_model, partition, pos_tag_emb_dropout,
             position_emb_dropout, bert_emb_dropout, emb_dropout, language, device
         )
         self.encoder = Encoder(
             d_model, partition, layer_num, hidden_dropout, attention_dropout, dim_ff, nhead, kqv_dim, device
         )
-        self.label_classifier = nn.Sequential(
+        self.joint_label_classifier = nn.Sequential(
             nn.Linear(d_model, label_hidden),
             nn.LayerNorm(label_hidden),
             nn.ReLU(),
-            nn.Linear(label_hidden, vocabs['labels'].size-1)
+            nn.Linear(label_hidden, joint_vocabs['labels'].size-1)
         )
+
+        self.parsing_label_classifier = nn.Sequential(
+            nn.Linear(d_model, label_hidden),
+            nn.LayerNorm(label_hidden),
+            nn.ReLU(),
+            nn.Linear(label_hidden, parsing_vocabs['labels'].size-1)
+        )
+
+        self.ner_label_classifier = nn.Sequential(
+            nn.Linear(d_model, label_hidden),
+            nn.LayerNorm(label_hidden),
+            nn.ReLU(),
+            nn.Linear(label_hidden, len(NER_LABELS))
+        )
+
         self.softmax = nn.Softmax(dim=-1)
-        self.pos_tags_vocab = vocabs['pos_tags']
-        self.labels_vocab = vocabs['labels']
-        self.cross_label_idx = cross_labels_idx
+        self.pos_tags_vocab = joint_vocabs['pos_tags']
+        self.joint_labels_vocab = joint_vocabs['labels']
+        self.parsing_labels_vocab = parsing_vocabs['labels']
+        # self.cross_label_idx = cross_labels_idx
         self.lambda_scaler = lambda_scaler
+        self.alpha_scaler = alpha_scaler
         self.device = device
 
     def forward(self, insts: Dict[str, List[Union[List[str], InternalParseNode]]], return_charts: bool = False)\
@@ -61,9 +80,16 @@ class JointEncoderModel(nn.Module):
         assert (batch_size, seq_len+1) == words_repr.shape[0:2]
         spans_repr = words_repr.unsqueeze(1) - words_repr.unsqueeze(2)  # [batch_size, seq_len+1, seq_len+1, dim]
         assert (batch_size, seq_len+1, seq_len+1) == spans_repr.shape[0:3]
-        labels_score = self.label_classifier(spans_repr)
-        charts = torch.cat([torch.zeros((batch_size, seq_len+1, seq_len+1, 1)).to(self.device), labels_score], dim=3)
-        charts_np = charts.cpu().detach().numpy()
+
+        empty_label_score = torch.zeros((batch_size, seq_len+1, seq_len+1, 1), device=self.device)
+        joint_labels_score = self.joint_label_classifier(spans_repr)
+        parsing_labels_score = self.parsing_label_classifier(spans_repr)
+        ner_labels_score = self.ner_label_classifier(spans_repr)
+
+        joint_charts = torch.cat([empty_label_score, joint_labels_score], dim=3)
+        parsing_charts = torch.cat([empty_label_score, parsing_labels_score], dim=3)
+        joint_charts_np = joint_charts.cpu().detach().numpy()
+        parsing_charts_np = parsing_charts.cpu().detach().numpy()
 
         # compute loss and generate tree
 
@@ -71,7 +97,7 @@ class JointEncoderModel(nn.Module):
         if return_charts:
             ret_charts = []
             for i, snt_len in enumerate(snts_len):
-                ret_charts.append(charts[i, :snt_len+1, :snt_len+1, :].cpu().numpy())
+                ret_charts.append(joint_charts[i, :snt_len+1, :snt_len+1, :].cpu().numpy())
             return ret_charts
 
         # when model test, just return trees and scores
@@ -79,8 +105,8 @@ class JointEncoderModel(nn.Module):
             trees = []
             scores = []
             for i, snt_len in enumerate(snts_len):
-                chart_np = charts_np[i, :snt_len+1, :snt_len+1, :]
-                score, p_i, p_j, p_label, _ = self.parse_from_chart(snt_len, chart_np)
+                chart_np = joint_charts_np[i, :snt_len+1, :snt_len+1, :]
+                score, p_i, p_j, p_label, _ = self.parse_from_chart(snt_len, chart_np, self.joint_labels_vocab)
                 pos_tag, snt = pos_tags[i], snts[i]
                 tree = self.generate_tree(p_i, p_j, p_label, pos_tag, snt)
                 trees.append(tree)
@@ -96,13 +122,20 @@ class JointEncoderModel(nn.Module):
         # Since this code is not undergoing algorithmic changes, it makes sense
         # to include the optimization even though it may only be a 10% speedup.
         # Note that no dropout occurs in the label portion of the network
-        cross_loss = torch.tensor(0.).to(self.device)
-        golds = insts['gold_trees']
-        p_is, p_js, g_is, g_js, p_labels, g_labels, batch_ids, paugment_total = [], [], [], [], [], [], [], 0.0
+        # cross_loss = torch.tensor(0., device=self.device)
+        joint_golds = insts['joint_gold_trees']
+        parsing_golds = insts['parsing_gold_trees']
+        p_is, p_js, g_is, g_js, p_labels, g_labels, batch_ids, paugment_total_joint = [], [], [], [], [], [], [], 0.0
+        p_is_parsing, p_js_parsing, g_is_parsing, g_js_parsing, p_labels_parsing, g_labels_parsing, batch_ids_parsing,\
+            paugment_total_parsing = [], [], [], [], [], [], [], 0.0
+        ner_is, ner_js, ner_labels, ner_batch_ids = [], [], [], []
         for i, snt_len in enumerate(snts_len):
-            chart_np = charts_np[i, :snt_len+1, :snt_len+1, :]
-            p_i, p_j, p_label, p_augment, g_i, g_j, g_label = self.parse_from_chart(snt_len, chart_np, golds[i])
-            paugment_total += p_augment
+
+            # joint parser
+            chart_np = joint_charts_np[i, :snt_len+1, :snt_len+1, :]
+            p_i, p_j, p_label, p_augment, g_i, g_j, g_label =\
+                self.parse_from_chart(snt_len, chart_np, self.joint_labels_vocab, joint_golds[i])
+            paugment_total_joint += p_augment
             p_is.extend(p_i.tolist())
             p_js.extend(p_j.tolist())
             p_labels.extend(p_label.tolist())
@@ -110,25 +143,82 @@ class JointEncoderModel(nn.Module):
             g_js.extend(g_j.tolist())
             g_labels.extend(g_label.tolist())
             batch_ids.extend([i for _ in range(len(p_i))])
-            # p_scores.append(torch.sum(chart[p_i.tolist(), p_j.tolist(), p_label.tolist()]).unsqueeze(0))
-            # g_scores.append(torch.sum(chart[g_i.tolist(), g_j.tolist(), g_label.tolist()]).unsqueeze(0))
+
+            # parsing parser
+            chart_np = parsing_charts_np[i, :snt_len+1, :snt_len+1, :]
+            p_i, p_j, p_label, p_augment, g_i, g_j, g_label =\
+                self.parse_from_chart(snt_len, chart_np, self.parsing_labels_vocab, parsing_golds[i])
+            paugment_total_parsing += p_augment
+            p_is_parsing.extend(p_i.tolist())
+            p_js_parsing.extend(p_j.tolist())
+            p_labels_parsing.extend(p_label.tolist())
+            g_is_parsing.extend(g_i.tolist())
+            g_js_parsing.extend(g_j.tolist())
+            g_labels_parsing.extend(g_label.tolist())
+            batch_ids_parsing.extend([i for _ in range(len(p_i))])
 
             # cross loss
-            cross_spans = self.generate_cross_label_spans(golds[i])
-            for constit, constit_gold, ner, ner_gold, span_start, span_end in cross_spans:
-                constit_idx = self.cross_label_idx[constit]
-                ner_idx = self.cross_label_idx[ner]
-                cross_constit_loss = self.softmax(charts[i, span_start, span_end, constit_idx])[constit_gold]
-                cross_ner_loss = self.softmax(charts[i, span_start, span_end, ner_idx])[ner_gold]
-                cross_loss = cross_loss - cross_constit_loss - cross_ner_loss
+            # cross_spans = self.generate_cross_label_spans(golds[i])
+            # for constit, constit_gold, ner, ner_gold, span_start, span_end in cross_spans:
+            #     constit_idx = self.cross_label_idx[constit]
+            #     ner_idx = self.cross_label_idx[ner]
+            #     cross_constit_loss = self.log_softmax(charts[i, span_start, span_end, constit_idx])[constit_gold]
+            #     cross_ner_loss = self.log_softmax(charts[i, span_start, span_end, ner_idx])[ner_gold]
+            #     cross_loss = cross_loss - cross_constit_loss - cross_ner_loss
 
-        p_scores = torch.sum(charts[batch_ids, p_is, p_js, p_labels])
-        g_scores = torch.sum(charts[batch_ids, g_is, g_js, g_labels])
-        loss = p_scores - g_scores + self.lambda_scaler*cross_loss + paugment_total
+            # ner idx
+            ner_i, ner_j, ner_label = self.generate_ner_spans(joint_golds[i])
+            ner_is.extend(ner_i)
+            ner_js.extend(ner_j)
+            ner_labels.extend(ner_label)
+            ner_batch_ids.extend([i for _ in range(len(ner_i))])
+
+        p_scores_joint = torch.sum(joint_charts[batch_ids, p_is, p_js, p_labels])
+        g_scores_joint = torch.sum(joint_charts[batch_ids, g_is, g_js, g_labels])
+        loss_joint = p_scores_joint - g_scores_joint + paugment_total_joint
+
+        p_scores_parsing = torch.sum(parsing_charts[batch_ids_parsing, p_is_parsing, p_js_parsing, p_labels_parsing])
+        g_scores_parsing = torch.sum(parsing_charts[batch_ids_parsing, g_is_parsing, g_js_parsing, g_labels_parsing])
+        loss_parsing = p_scores_parsing - g_scores_parsing + paugment_total_parsing
+
+        ner_score: torch.Tensor = ner_labels_score[ner_batch_ids, ner_is, ner_js, :]
+        assert ner_score.shape[0] == len(ner_labels)
+        ner_loss = torch.sum(torch.log2(self.softmax(ner_score)[[i for i in range(len(ner_labels))], ner_labels]))
+
+        loss = loss_joint + self.lambda_scaler*(self.alpha_scaler*loss_parsing - (1.-self.alpha_scaler)*ner_loss)
         return loss
 
-    def generate_cross_label_spans(self, tree: InternalParseNode) -> List[Tuple[str, int, str, int, int, int]]:
-        ner_spans = []
+    # def generate_cross_label_spans(self, tree: InternalParseNode) -> List[Tuple[str, int, str, int, int, int]]:
+    #     ner_spans = []
+    #     q = Queue()
+    #     q.put(tree)
+    #     while not q.empty():
+    #         tree = q.get()
+
+    #         # generate ner spans
+    #         for label in tree.label:
+    #             if label.endswith('*'):
+    #                 label_splited_list = label[:-1].split('-')
+    #                 constitent, ner = '-'.join(label_splited_list[:-1]), label_splited_list[-1]
+    #                 assert constitent in self.cross_label_idx and ner in self.cross_label_idx
+
+    #                 tree_label_idx = self.labels_vocab.index(tree.label)
+    #                 assert tree_label_idx in self.cross_label_idx[constitent]
+    #                 assert tree_label_idx in self.cross_label_idx[ner]
+
+    #                 constitent_gold = self.cross_label_idx[constitent].index(tree_label_idx)
+    #                 ner_gold = self.cross_label_idx[ner].index(tree_label_idx)
+    #                 ner_spans.append((constitent, constitent_gold, ner, ner_gold, tree.left, tree.right))
+
+    #         for child in tree.children:
+    #             assert isinstance(child, InternalParseNode) or isinstance(child, LeafParseNode)
+    #             if isinstance(child, InternalParseNode):
+    #                 q.put(child)
+
+    #     return ner_spans
+
+    def generate_ner_spans(self, tree: InternalParseNode):
+        ner_i, ner_j, ner_label = [], [], []
         q = Queue()
         q.put(tree)
         while not q.empty():
@@ -137,31 +227,24 @@ class JointEncoderModel(nn.Module):
             # generate ner spans
             for label in tree.label:
                 if label.endswith('*'):
-                    label_splited_list = label[:-1].split('-')
-                    constitent, ner = '-'.join(label_splited_list[:-1]), label_splited_list[-1]
-                    assert constitent in self.cross_label_idx and ner in self.cross_label_idx
-
-                    tree_label_idx = self.labels_vocab.index(tree.label)
-                    assert tree_label_idx in self.cross_label_idx[constitent]
-                    assert tree_label_idx in self.cross_label_idx[ner]
-
-                    constitent_gold = self.cross_label_idx[constitent].index(tree_label_idx)
-                    ner_gold = self.cross_label_idx[ner].index(tree_label_idx)
-                    ner_spans.append((constitent, constitent_gold, ner, ner_gold, tree.left, tree.right))
+                    ner = label[:-1].split('-')[-1]
+                    assert ner in NER_LABELS
+                    ner_i.append(tree.left)
+                    ner_j.append(tree.right)
+                    ner_label.append(NER_LABELS.index(ner))
 
             for child in tree.children:
                 assert isinstance(child, InternalParseNode) or isinstance(child, LeafParseNode)
                 if isinstance(child, InternalParseNode):
                     q.put(child)
+        return ner_i, ner_j, ner_label
 
-        return ner_spans
-
-    def parse_from_chart(self, snt_len: int, chart_np: np.ndarray, gold=None):
+    def parse_from_chart(self, snt_len: int, chart_np: np.ndarray, vocab, gold=None):
         decoder_args = dict(
             sentence_len=snt_len,
             label_scores_chart=chart_np,
             gold=gold,
-            label_vocab=self.labels_vocab,
+            label_vocab=vocab,
             is_train=self.training
         )
 
@@ -179,7 +262,7 @@ class JointEncoderModel(nn.Module):
             nonlocal idx
             idx += 1
             i, j, label_idx = p_i[idx], p_j[idx], p_label[idx]
-            label = self.labels_vocab.value(label_idx)
+            label = self.joint_labels_vocab.value(label_idx)
             if (i + 1) >= j:
                 tag, word = pos_tag[i], snt[i]
                 tree = trees.LeafParseNode(int(i), tag, word)
@@ -349,10 +432,10 @@ class EmbeddingLayer(nn.Module):
                 offsets.append(offset)
 
         return (
-            torch.tensor(ids, dtype=torch.long).to(self.device),
-            torch.tensor(pos_tags_ids, dtype=torch.long).to(self.device) if self.use_pos_tag else None,
-            torch.tensor(attention_mask, dtype=torch.int).to(self.device),
-            torch.tensor(snts_mask, dtype=torch.int).to(self.device),
+            torch.tensor(ids, dtype=torch.long, device=self.device),
+            torch.tensor(pos_tags_ids, dtype=torch.long, device=self.device) if self.use_pos_tag else None,
+            torch.tensor(attention_mask, dtype=torch.int, device=self.device),
+            torch.tensor(snts_mask, dtype=torch.int, device=self.device),
             offsets
         )
 
@@ -413,7 +496,7 @@ class EmbeddingLayer(nn.Module):
                 words_repr_list = torch.split(snt_bert_embeddings, words_length, dim=0)
                 words_repr = torch.cat([
                     self.pool(word_repr.permute(1, 0)).permute(1, 0) for word_repr in words_repr_list] +
-                    [torch.zeros(seq_len-len(words_repr_list), self.bert_hidden_size).to(self.device)], dim=0)
+                    [torch.zeros(seq_len-len(words_repr_list), self.bert_hidden_size, device=self.device)], dim=0)
                 bert_embeddings_list.append(words_repr.unsqueeze(0))
             bert_embeddings = torch.cat(bert_embeddings_list, dim=0)
         else:

@@ -37,7 +37,7 @@ class JointModel(nn.Module):
             nn.ReLU(),
             nn.Linear(label_hidden, vocabs['labels'].size-1)
         )
-        self.softmax = nn.Softmax(dim=-1)
+        self.log_softmax = nn.LogSoftmax(dim=-1)
         self.pos_tags_vocab = vocabs['pos_tags']
         self.labels_vocab = vocabs['labels']
         self.cross_label_idx = cross_labels_idx
@@ -62,7 +62,7 @@ class JointModel(nn.Module):
         spans_repr = words_repr.unsqueeze(1) - words_repr.unsqueeze(2)  # [batch_size, seq_len+1, seq_len+1, dim]
         assert (batch_size, seq_len+1, seq_len+1) == spans_repr.shape[0:3]
         labels_score = self.label_classifier(spans_repr)
-        charts = torch.cat([torch.zeros((batch_size, seq_len+1, seq_len+1, 1)).to(self.device), labels_score], dim=3)
+        charts = torch.cat([torch.zeros((batch_size, seq_len+1, seq_len+1, 1), device=self.device), labels_score], dim=3)
         charts_np = charts.cpu().detach().numpy()
 
         # compute loss and generate tree
@@ -96,7 +96,7 @@ class JointModel(nn.Module):
         # Since this code is not undergoing algorithmic changes, it makes sense
         # to include the optimization even though it may only be a 10% speedup.
         # Note that no dropout occurs in the label portion of the network
-        cross_loss = torch.tensor(0.).to(self.device)
+        cross_loss = torch.tensor(0., device=self.device)
         golds = insts['gold_trees']
         p_is, p_js, g_is, g_js, p_labels, g_labels, batch_ids, paugment_total = [], [], [], [], [], [], [], 0.0
         for i, snt_len in enumerate(snts_len):
@@ -118,8 +118,8 @@ class JointModel(nn.Module):
             for constit, constit_gold, ner, ner_gold, span_start, span_end in cross_spans:
                 constit_idx = self.cross_label_idx[constit]
                 ner_idx = self.cross_label_idx[ner]
-                cross_constit_loss = self.softmax(charts[i, span_start, span_end, constit_idx])[constit_gold]
-                cross_ner_loss = self.softmax(charts[i, span_start, span_end, ner_idx])[ner_gold]
+                cross_constit_loss = self.log_softmax(charts[i, span_start, span_end, constit_idx])[constit_gold]
+                cross_ner_loss = self.log_softmax(charts[i, span_start, span_end, ner_idx])[ner_gold]
                 cross_loss = cross_loss - cross_constit_loss - cross_ner_loss
 
         p_scores = torch.sum(charts[batch_ids, p_is, p_js, p_labels])
@@ -349,10 +349,10 @@ class EmbeddingLayer(nn.Module):
                 offsets.append(offset)
 
         return (
-            torch.tensor(ids, dtype=torch.long).to(self.device),
-            torch.tensor(pos_tags_ids, dtype=torch.long).to(self.device) if self.use_pos_tag else None,
-            torch.tensor(attention_mask, dtype=torch.int).to(self.device),
-            torch.tensor(snts_mask, dtype=torch.int).to(self.device),
+            torch.tensor(ids, dtype=torch.long, device=self.device),
+            torch.tensor(pos_tags_ids, dtype=torch.long, device=self.device) if self.use_pos_tag else None,
+            torch.tensor(attention_mask, dtype=torch.int, device=self.device),
+            torch.tensor(snts_mask, dtype=torch.int, device=self.device),
             offsets
         )
 
@@ -413,7 +413,7 @@ class EmbeddingLayer(nn.Module):
                 words_repr_list = torch.split(snt_bert_embeddings, words_length, dim=0)
                 words_repr = torch.cat([
                     self.pool(word_repr.permute(1, 0)).permute(1, 0) for word_repr in words_repr_list] +
-                    [torch.zeros(seq_len-len(words_repr_list), self.bert_hidden_size).to(self.device)], dim=0)
+                    [torch.zeros(seq_len-len(words_repr_list), self.bert_hidden_size, device=self.device)], dim=0)
                 bert_embeddings_list.append(words_repr.unsqueeze(0))
             bert_embeddings = torch.cat(bert_embeddings_list, dim=0)
         else:

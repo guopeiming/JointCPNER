@@ -19,23 +19,31 @@ class Optim:
                  lr_decay_factor: float, weight_decay: float, clip_grad: bool, clip_grad_max_norm: float):
         assert opti in Optim.name_list, 'optimizer name is wrong.'
 
-        params_list = []
-        lr_lambdas = []
+        params_list_finetune, params_list_norm = [], []
         params_finetune, params_total = 0, 0
         for name, param in model.named_parameters():
             if name.find(Constants.FINE_TUNE_NAME) != -1:
-                params_list.append({'params': param, 'lr': lr_fine_tune})
-                lr_lambdas.append(get_lr_scheduler_lambda(lr_fine_tune, warmup_steps, lr_decay_factor))
+                params_list_finetune.append(param)
                 params_finetune += param.numel()
             else:
-                params_list.append({'params': param, 'lr': lr})
-                lr_lambdas.append(get_lr_scheduler_lambda(lr, warmup_steps, lr_decay_factor))
+                params_list_norm.append(param)
             params_total += param.numel()
 
+        params_group = [
+            {'params': params_list_finetune, 'lr': lr_fine_tune},
+            {'params': params_list_norm, 'lr': lr},
+        ]
+        lr_lambdas_group = [
+            LrLambdaExp(lr_fine_tune, warmup_steps, lr_decay_factor),
+            LrLambdaExp(lr, warmup_steps, lr_decay_factor)
+        ]
+        assert len(params_group) == len(lr_lambdas_group)
+        assert all(params['lr'] == lr_lambdas.init_lr for params, lr_lambdas in zip(params_group, lr_lambdas_group))
+
         if opti == 'Adam':
-            self._optimizer = torch.optim.Adam(params_list, weight_decay=weight_decay)
+            self._optimizer = torch.optim.Adam(params_group, weight_decay=weight_decay)
         elif opti == 'SGD':
-            self._optimizer = torch.optim.SGD(params_list, lr, weight_decay)
+            self._optimizer = torch.optim.SGD(params_group, weight_decay=weight_decay)
         else:
             print('optimizer name is wrong.')
             exit(-1)
@@ -43,7 +51,7 @@ class Optim:
         self.model = model
         self.clip_grad = clip_grad
         self.clip_grad_max_norm = clip_grad_max_norm
-        self.scheduler = LRScheduler(self._optimizer, lr_lambdas)
+        self.scheduler = LRScheduler(self._optimizer, lr_lambdas_group)
         self.dynamic_norm = 0.0
         print('len(total_parameters): %d, len(fine_tuned_parameters): %d, ratio: %.05f'
               % (params_total, params_finetune, params_finetune/params_total), end='\n\n')
@@ -105,5 +113,14 @@ class LRScheduler(LambdaLR):
         return self.curr_lrs.copy()
 
 
-def get_lr_scheduler_lambda(init_lr, warmup_step, decay_factor):
-    return lambda step, curr_lr: ((step+1)/warmup_step)*init_lr if step < warmup_step else curr_lr**decay_factor
+class LrLambdaExp(object):
+    """My lr lambda expression.
+    """
+    def __init__(self, init_lr: float, warmup_steps: int, decay_factor: float):
+        super(LrLambdaExp, self).__init__()
+        self.init_lr = init_lr
+        self.warmup_steps = warmup_steps
+        self.decay_factor = decay_factor
+
+    def __call__(self, step: int, curr_lr: float) -> float:
+        return ((step+1)/self.warmup_steps)*self.init_lr if step < self.warmup_steps else curr_lr**self.decay_factor

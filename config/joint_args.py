@@ -59,7 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--nhead', default=8, type=int, help='head number')
     parser.add_argument('--kqv_dim', default=64, type=int, help='dimention of kqv')
     # [Model-classifier]
-    parser.add_argument('--label_hidden', default=250, type=int, help='dimention of label_hidden')
+    parser.add_argument('--label_hidden', default=1250, type=int, help='dimention of label_hidden')
 
     # [Loss]
     parser.add_argument('--lambda_scaler', default=0.8, type=float, help='cross loss scaler')
@@ -68,8 +68,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--evalb_path', default='./EVALB_SPMRL/', type=str, help='path of evaluation script')
 
     # [Constants]
-    parser.add_argument('--DATASET_MAX_SNT_LENGTH', default=230, type=str, help='when sentence length larger than it, drop it')
-    parser.add_argument('--BATCH_MAX_SNT_LENGTH', default=90, type=str, help='when sentence max len bigger than it, split batch to sub-batch')
+    parser.add_argument('--DATASET_MAX_SNT_LENGTH', default=200, type=str, help='when sentence length larger than it, drop it')
+    parser.add_argument('--BATCH_MAX_SNT_LENGTH', default=80, type=str, help='when sentence max len bigger than it, split batch to sub-batch')
 
     args = parser.parse_args()
     return args

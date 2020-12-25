@@ -315,7 +315,6 @@ class PartitionTransformer(nn.Module):
         Arguments:
             attention_mask: torch.Tensor with 1 indicating tokens to ATTEND to
             input_shape: tuple, shape of input_ids
-            device: torch.Device, usually self.device
 
         Returns:
             torch.Tensor with dtype of attention_mask.dtype
