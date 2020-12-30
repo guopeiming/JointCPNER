@@ -9,6 +9,7 @@ def parse_args() -> argparse.Namespace:
     # [Data]
     parser.add_argument('--input', type=str, default='./data/onto/joint_down/', help='path of input data')
     parser.add_argument('--language', type=str, choices=['chinese', 'arabic', 'english'], default='chinese', help='language')
+    parser.add_argument('--transliterate', default='', type=str, help='whether to transliterate when using BERT/XLNet')
 
     # [Train]
     parser.add_argument('--debug', default=False, type=bool, help='debug mode')
@@ -22,9 +23,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--num_workers', default=4, type=int, help='how many subprocesses to use for data loading')
     parser.add_argument('--epoch', default=35, type=int, help='max training epoch')
     parser.add_argument('--log_interval', default=200, type=int, help='interval on print log info')
-    parser.add_argument('--eval_interval', default=700, type=int, help='interval on print evaluate model')
+    parser.add_argument('--eval_interval', default=1200, type=int, help='interval on print evaluate model')
     parser.add_argument('--early_stop', default=True, type=bool, help='early stop')
-    parser.add_argument('--patience', default=5, type=int, help='early stop patience epoch')
+    parser.add_argument('--patience', default=3, type=int, help='early stop patience epoch')
     parser.add_argument('--save', default=False, type=bool, help='whether to save model')
 
     # [Optimizer]
@@ -44,7 +45,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--use_pos_tag', default=False, type=bool, help='whether to use pos_tag')
     # [Model-Embedding]
     parser.add_argument('--bert_path', default='/home/data/embedding/bert-base-chinese/', type=str, help='path of BERT')
-    parser.add_argument('--transliterate', default='', type=str, help='whether to transliterate when using BERT/XLNet')
     parser.add_argument('--d_model', default=1024, type=int, help='model dimension')
     parser.add_argument('--partition', default=True, type=bool, help='whether to use content and position partition')
     parser.add_argument('--pos_tag_emb_dropout', default=0.2, type=float, help='pos tag dropout')
@@ -69,7 +69,7 @@ def parse_args() -> argparse.Namespace:
 
     # [Constants]
     parser.add_argument('--DATASET_MAX_SNT_LENGTH', default=200, type=str, help='when sentence length larger than it, drop it')
-    parser.add_argument('--BATCH_MAX_SNT_LENGTH', default=80, type=str, help='when sentence max len bigger than it, split batch to sub-batch')
+    parser.add_argument('--BATCH_MAX_SNT_LENGTH', default=100, type=str, help='when sentence max len bigger than it, split batch to sub-batch')
 
     args = parser.parse_args()
     return args

@@ -260,9 +260,9 @@ class EmbeddingLayer(nn.Module):
 
     def forward(self, pos_tags: List[List[str]], snts: List[List[str]]):
         # BERT tokenize
-        ids, pos_tags_ids, mask, snts_mask, offsets = self.__tokenize(pos_tags, snts)
+        ids, pos_tags_ids, bert_mask, snts_mask, offsets = self.__tokenize(pos_tags, snts)
         batch_size, seq_len = snts_mask.shape
-        bert_embeddings = self.BERT(ids, attention_mask=mask)[0]  # [batch_size, seq_len, dim]
+        bert_embeddings = self.BERT(ids, attention_mask=bert_mask)[0]  # [batch_size, seq_len, dim]
         if self.subword != CHARACTER_BASED:
             bert_embeddings = self.__process_subword_repr(bert_embeddings, offsets, batch_size, seq_len, snts)
         content_embeddings = self.bert_proj(self.bert_emb_dropout(bert_embeddings))

@@ -53,6 +53,7 @@ class JointEncoderModel(nn.Module):
             nn.ReLU(),
             nn.Linear(label_hidden, len(NER_LABELS))
         )
+        self.criterion_ner = nn.CrossEntropyLoss(reduction='sum')
 
         self.softmax = nn.Softmax(dim=-1)
         self.pos_tags_vocab = joint_vocabs['pos_tags']
@@ -81,13 +82,15 @@ class JointEncoderModel(nn.Module):
         spans_repr = words_repr.unsqueeze(1) - words_repr.unsqueeze(2)  # [batch_size, seq_len+1, seq_len+1, dim]
         assert (batch_size, seq_len+1, seq_len+1) == spans_repr.shape[0:3]
 
-        empty_label_score = torch.zeros((batch_size, seq_len+1, seq_len+1, 1), device=self.device)
         joint_labels_score = self.joint_label_classifier(spans_repr)
         parsing_labels_score = self.parsing_label_classifier(spans_repr)
         ner_labels_score = self.ner_label_classifier(spans_repr)
 
+        empty_label_score = torch.zeros((batch_size, seq_len+1, seq_len+1, 1), device=self.device)
         joint_charts = torch.cat([empty_label_score, joint_labels_score], dim=3)
         parsing_charts = torch.cat([empty_label_score, parsing_labels_score], dim=3)
+        empty_label_score = torch.full((batch_size, seq_len+1, seq_len+1, 1), 0., device=self.device)
+        ner_labels_score = torch.cat([ner_labels_score, empty_label_score], dim=3)
         joint_charts_np = joint_charts.cpu().detach().numpy()
         parsing_charts_np = parsing_charts.cpu().detach().numpy()
 
@@ -183,9 +186,10 @@ class JointEncoderModel(nn.Module):
 
         ner_score: torch.Tensor = ner_labels_score[ner_batch_ids, ner_is, ner_js, :]
         assert ner_score.shape[0] == len(ner_labels)
-        ner_loss = torch.sum(torch.log2(self.softmax(ner_score)[[i for i in range(len(ner_labels))], ner_labels]))
+        # ner_loss = torch.sum(torch.log2(self.softmax(ner_score)[[i for i in range(len(ner_labels))], ner_labels]))
+        ner_loss = self.criterion_ner(ner_score, torch.tensor(ner_labels, dtype=torch.long, device=self.device))
 
-        loss = loss_joint + self.lambda_scaler*(self.alpha_scaler*loss_parsing - (1.-self.alpha_scaler)*ner_loss)
+        loss = loss_joint + self.lambda_scaler*(self.alpha_scaler*loss_parsing + (1.-self.alpha_scaler)*ner_loss)
         return loss
 
     # def generate_cross_label_spans(self, tree: InternalParseNode) -> List[Tuple[str, int, str, int, int, int]]:
@@ -343,9 +347,9 @@ class EmbeddingLayer(nn.Module):
 
     def forward(self, pos_tags: List[List[str]], snts: List[List[str]]):
         # BERT tokenize
-        ids, pos_tags_ids, mask, snts_mask, offsets = self.__tokenize(pos_tags, snts)
+        ids, pos_tags_ids, bert_mask, snts_mask, offsets = self.__tokenize(pos_tags, snts)
         batch_size, seq_len = snts_mask.shape
-        bert_embeddings = self.BERT(ids, attention_mask=mask)[0]  # [batch_size, seq_len, dim]
+        bert_embeddings = self.BERT(ids, attention_mask=bert_mask)[0]  # [batch_size, seq_len, dim]
         if self.subword != CHARACTER_BASED:
             bert_embeddings = self.__process_subword_repr(bert_embeddings, offsets, batch_size, seq_len, snts)
         content_embeddings = self.bert_proj(self.bert_emb_dropout(bert_embeddings))

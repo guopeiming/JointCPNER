@@ -132,7 +132,7 @@ def main():
     start = time.time()
     steps, loss_value, total_batch_size = 1, 0., 0
     best_dev, best_test = None, None
-    patience = args.patience * (len(train_data)//(args.accum_steps*args.eval_interval))
+    patience = args.patience
     for epoch_i in range(1, args.epoch):
         for batch_i, insts in enumerate(train_data, start=1):
             model.train()
@@ -165,8 +165,6 @@ def main():
                 loss_value, total_batch_size = 0., 0
                 torch.cuda.empty_cache()
             if steps % (args.accum_steps * args.eval_interval) == 0:
-                if args.early_stop:
-                    patience -= 1
                 print('model evaluating starts...', flush=True)
                 fscore_dev, pred_dev, gold_dev = eval_model(
                     model, dev_data, args.language, args.DATASET_MAX_SNT_LENGTH, args.BATCH_MAX_SNT_LENGTH,
@@ -180,7 +178,7 @@ def main():
                 if best_dev is None or fscore_dev.parsing_f > best_dev.parsing_f:
                     best_dev, best_test = fscore_dev, fscore_test
                     fitlog.add_best_metric({'f_dev': best_dev.parsing_f, 'f_test': best_test.parsing_f})
-                    patience = args.patience * (len(train_data)//(args.accum_steps*args.eval_interval))
+                    patience = args.patience
                     write_trees(os.path.join(args.save_path, 'dev.pred.best.trees'), pred_dev,
                                 os.path.join(args.save_path, 'dev.gold.trees'), gold_dev)
                     write_trees(os.path.join(args.save_path, 'test.pred.best.trees'), pred_test,
@@ -195,10 +193,10 @@ def main():
             steps += 1
 
         if args.early_stop:
+            patience -= 1
             if patience < 0:
                 print('early stop')
                 break
-        print('\n\n')
 
     # ====== postprocess ====== #
     postprocess(args, start)
