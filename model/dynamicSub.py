@@ -16,15 +16,17 @@ from model.transformer import LearnedPositionalEmbedding, Transformer
 from model.partition_transformer import PartitionTransformer
 
 
-class JointEncoderSubModel(nn.Module):
+# dynamic loss, sub span encoder
+class DynamicSubModel(nn.Module):
     def __init__(self, joint_vocabs: Dict[str, Vocabulary], parsing_vocabs: Dict[str, Vocabulary],
                  #  cross_labels_idx: Dict[str, Tuple[int]],
                  subword: str, use_pos_tag: bool, bert_path: str,
                  transliterate: str, d_model: int, partition: bool, pos_tag_emb_dropout: float,
                  position_emb_dropout: float, bert_emb_dropout: float, emb_dropout: float, layer_num: int,
                  hidden_dropout: float, attention_dropout: float, dim_ff: int, nhead: int, kqv_dim: int,
-                 label_hidden: int, lambda_scaler: float, alpha_scaler: float, language: str, device: torch.device):
-        super(JointEncoderSubModel, self).__init__()
+                 label_hidden: int, max_lambda_scaler: float, alpha_scaler: int, dynamic_loss_max_steps: int,
+                 language: str, device: torch.device):
+        super(DynamicSubModel, self).__init__()
 
         self.embeddings = EmbeddingLayer(
             joint_vocabs, subword, use_pos_tag, bert_path, transliterate, d_model, partition, pos_tag_emb_dropout,
@@ -33,6 +35,7 @@ class JointEncoderSubModel(nn.Module):
         self.encoder = Encoder(
             d_model, partition, layer_num, hidden_dropout, attention_dropout, dim_ff, nhead, kqv_dim, device
         )
+
         self.joint_label_classifier = nn.Sequential(
             nn.Linear(d_model, label_hidden),
             nn.LayerNorm(label_hidden),
@@ -58,13 +61,15 @@ class JointEncoderSubModel(nn.Module):
         self.ner_classifier = nn.Linear(label_hidden, len(NER_LABELS))
         self.criterion_ner = nn.CrossEntropyLoss(reduction='sum')
 
-        self.softmax = nn.Softmax(dim=-1)
+        # self.softmax = nn.Softmax(dim=-1)
         self.pos_tags_vocab = joint_vocabs['pos_tags']
         self.joint_labels_vocab = joint_vocabs['labels']
         self.parsing_labels_vocab = parsing_vocabs['labels']
         # self.cross_label_idx = cross_labels_idx
-        self.lambda_scaler = lambda_scaler
+        self.max_lambda_scaler = max_lambda_scaler
         self.alpha_scaler = alpha_scaler
+        self.steps = 0
+        self.dynamic_loss_max_steps = dynamic_loss_max_steps
         self.device = device
 
     def forward(self, insts: Dict[str, List[Union[List[str], InternalParseNode]]], return_charts: bool = False)\
@@ -96,8 +101,6 @@ class JointEncoderSubModel(nn.Module):
         empty_label_score = torch.zeros((batch_size, seq_len+1, seq_len+1, 1), device=self.device)
         joint_charts = torch.cat([empty_label_score, joint_labels_score], dim=3)
         parsing_charts = torch.cat([empty_label_score, parsing_labels_score], dim=3)
-        # empty_label_score = torch.full((batch_size, seq_len, seq_len, 1), 0., device=self.device)
-        # ner_labels_score = torch.cat([ner_labels_score, empty_label_score], dim=3)
         joint_charts_np = joint_charts.cpu().detach().numpy()
         parsing_charts_np = parsing_charts.cpu().detach().numpy()
 
@@ -213,7 +216,8 @@ class JointEncoderSubModel(nn.Module):
         # target = torch.tensor(spans_label_idx, dtype=torch.long, device=self.device)
         # ner_loss = self.criterion_ner(torch.masked_select(ner_labels_score, spans_mask_tensor).view(-1, len(NER_LABELS)+1), target)
 
-        loss = loss_joint + self.lambda_scaler*((self.alpha_scaler+1.)*loss_parsing + (1.-self.alpha_scaler)*ner_loss)
+        loss_lambda = self.get_lambda()
+        loss = loss_lambda*loss_joint + max(0., 1.-loss_lambda)*((self.alpha_scaler+1.)*loss_parsing + (1.-self.alpha_scaler)*ner_loss)
         return loss
 
     # def generate_cross_label_spans(self, tree: InternalParseNode) -> List[Tuple[str, int, str, int, int, int]]:
@@ -308,6 +312,12 @@ class JointEncoderSubModel(nn.Module):
 
         tree = make_tree()[0]
         return tree
+
+    def set_steps(self, steps: int):
+        self.steps = steps
+
+    def get_lambda(self) -> float:
+        return min(self.max_lambda_scaler, self.steps/self.dynamic_loss_max_steps*self.max_lambda_scaler)
 
     def pack_state_dict(self):
         """generate state_dict when save the model.

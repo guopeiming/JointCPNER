@@ -125,7 +125,7 @@ class DynamicShareModel(nn.Module):
         p_is, p_js, g_is, g_js, p_labels, g_labels, batch_ids, paugment_total_joint = [], [], [], [], [], [], [], 0.0
         p_is_parsing, p_js_parsing, g_is_parsing, g_js_parsing, p_labels_parsing, g_labels_parsing, batch_ids_parsing,\
             paugment_total_parsing = [], [], [], [], [], [], [], 0.0
-        # ner_is, ner_js, ner_labels, ner_batch_ids = [], [], [], []
+        ner_is, ner_js, ner_labels, ner_batch_ids = [], [], [], []
         for i, snt_len in enumerate(snts_len):
 
             # joint parser
@@ -164,11 +164,11 @@ class DynamicShareModel(nn.Module):
             #     cross_loss = cross_loss - cross_constit_loss - cross_ner_loss
 
             # ner idx
-            # ner_i, ner_j, ner_label = self.generate_ner_spans(joint_golds[i])
-            # ner_is.extend(ner_i)
-            # ner_js.extend([j-1 for j in ner_j])
-            # ner_labels.extend(ner_label)
-            # ner_batch_ids.extend([i for _ in range(len(ner_i))])
+            ner_i, ner_j, ner_label = self.generate_ner_spans(joint_golds[i])
+            ner_is.extend(ner_i)
+            ner_js.extend([j-1 for j in ner_j])
+            ner_labels.extend(ner_label)
+            ner_batch_ids.extend([i for _ in range(len(ner_i))])
 
         p_scores_joint = torch.sum(joint_charts[batch_ids, p_is, p_js, p_labels])
         g_scores_joint = torch.sum(joint_charts[batch_ids, g_is, g_js, g_labels])
@@ -178,27 +178,27 @@ class DynamicShareModel(nn.Module):
         g_scores_parsing = torch.sum(parsing_charts[batch_ids_parsing, g_is_parsing, g_js_parsing, g_labels_parsing])
         loss_parsing = p_scores_parsing - g_scores_parsing + paugment_total_parsing
 
-        # ner_score: torch.Tensor = ner_labels_score[ner_batch_ids, ner_is, ner_js, :]
-        # assert ner_score.shape[0] == len(ner_labels)
-        # ner_loss = self.criterion_ner(ner_score, torch.tensor(ner_labels, dtype=torch.long, device=self.device))
+        ner_score: torch.Tensor = ner_labels_score[ner_batch_ids, ner_is, ner_js, :]
+        assert ner_score.shape[0] == len(ner_labels)
+        ner_loss = self.criterion_ner(ner_score, torch.tensor(ner_labels, dtype=torch.long, device=self.device))
 
-        spans_mask = [
-            [[0]*i + [1]*(snt_len-i) + [0]*(seq_len-snt_len) if i < snt_len else [0]*seq_len for i in range(seq_len)]
-            for snt_len in snts_len
-        ]
-        spans_mask_tensor = torch.tensor(spans_mask, dtype=torch.bool, device=self.device).unsqueeze(3)
-        spans_label_idx = []
-        for idx, gold_tree in enumerate(joint_golds):
-            label_idx_np = np.full((snts_len[idx], snts_len[idx]), len(NER_LABELS), dtype=np.int)
-            ner_i, ner_j, ner_label = self.generate_ner_spans(gold_tree)
-            for label_idx, start_i, end_j in zip(ner_label, ner_i, ner_j):
-                label_idx_np[start_i, end_j-1] = label_idx
-            for i in range(snts_len[idx]):
-                spans_label_idx.extend(label_idx_np[i, i:].tolist())
-        assert np.sum(np.array(spans_mask)) == len(spans_label_idx)
+        # spans_mask = [
+        #     [[0]*i + [1]*(snt_len-i) + [0]*(seq_len-snt_len) if i < snt_len else [0]*seq_len for i in range(seq_len)]
+        #     for snt_len in snts_len
+        # ]
+        # spans_mask_tensor = torch.tensor(spans_mask, dtype=torch.bool, device=self.device).unsqueeze(3)
+        # spans_label_idx = []
+        # for idx, gold_tree in enumerate(joint_golds):
+        #     label_idx_np = np.full((snts_len[idx], snts_len[idx]), len(NER_LABELS), dtype=np.int)
+        #     ner_i, ner_j, ner_label = self.generate_ner_spans(gold_tree)
+        #     for label_idx, start_i, end_j in zip(ner_label, ner_i, ner_j):
+        #         label_idx_np[start_i, end_j-1] = label_idx
+        #     for i in range(snts_len[idx]):
+        #         spans_label_idx.extend(label_idx_np[i, i:].tolist())
+        # assert np.sum(np.array(spans_mask)) == len(spans_label_idx)
 
-        target = torch.tensor(spans_label_idx, dtype=torch.long, device=self.device)
-        ner_loss = self.criterion_ner(torch.masked_select(ner_labels_score, spans_mask_tensor).view(-1, len(NER_LABELS)+1), target)
+        # target = torch.tensor(spans_label_idx, dtype=torch.long, device=self.device)
+        # ner_loss = self.criterion_ner(torch.masked_select(ner_labels_score, spans_mask_tensor).view(-1, len(NER_LABELS)+1), target)
 
         loss_lambda = self.get_lambda()
         loss = loss_lambda*loss_joint + max(0., 1.-loss_lambda)*(loss_parsing + ner_loss)

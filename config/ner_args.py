@@ -20,7 +20,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--accum_steps', default=1, type=int, help='the number of accumulated steps before backward')
     parser.add_argument('--shuffle', default=True, type=bool, help='set to True to have the data reshuffled at every epoch')
     parser.add_argument('--drop_last', default=False, type=bool, help='whether to drop the last data')
-    parser.add_argument('--num_workers', default=4, type=int, help='how many subprocesses to use for data loading')
+    parser.add_argument('--num_workers', default=2, type=int, help='how many subprocesses to use for data loading')
     parser.add_argument('--epoch', default=35, type=int, help='max training epoch')
     parser.add_argument('--log_interval', default=200, type=int, help='interval on print log info')
     parser.add_argument('--eval_interval', default=1200, type=int, help='interval on print evaluate model')

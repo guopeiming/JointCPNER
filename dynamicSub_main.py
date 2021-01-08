@@ -10,9 +10,9 @@ import datetime
 import numpy as np
 from utils.optim import Optim
 from utils import joint_evaluate
-from model.JointSubModel import JointEncoderSubModel
+from model.dynamicSub import DynamicSubModel
 from torch.utils.data import DataLoader
-from config.jointencodersub_args import parse_args
+from config.dynamicsub_args import parse_args
 from utils.visual_logger import VisualLogger
 from utils.trees import InternalTreebankNode
 from typing import Tuple, List, Set, Union, Dict
@@ -95,7 +95,7 @@ def main():
 
     # ======= Preparing Model ======= #
     print("\nModel Preparing starts...")
-    model = JointEncoderSubModel(
+    model = DynamicSubModel(
                 joint_vocabs,
                 parsing_vocabs,
                 # cross_labels_idx,
@@ -120,8 +120,9 @@ def main():
                 # classifier
                 args.label_hidden,
                 # loss
-                args.lambda_scaler,
+                args.max_lambda_scaler,
                 args.alpha_scaler,
+                args.dynamic_loss_max_epoch*len(train_data),
                 args.language,
                 args.device
             ).cuda()
@@ -144,6 +145,7 @@ def main():
     for epoch_i in range(1, args.epoch):
         for batch_i, insts in enumerate(train_data, start=1):
             model.train()
+            model.set_steps(steps)
 
             insts, batch_size, max_len = batch_filter(insts, args.language, args.DATASET_MAX_SNT_LENGTH)
             insts_list = batch_spliter(insts, max_len, args.BATCH_MAX_SNT_LENGTH)
@@ -166,7 +168,7 @@ def main():
                     (epoch_i, args.epoch, batch_i//args.accum_steps, len(train_data)//args.accum_steps,
                      loss_value/total_batch_size), flush=True
                 )
-                visual_dic = {'loss/train': loss_value, 'lr': optimizer.get_lr()[0]}
+                visual_dic = {'loss/train': loss_value, 'lr': optimizer.get_lr()[0], 'lambda': model.get_lambda()}
                 if args.clip_grad:
                     visual_dic['norm'] = optimizer.get_dynamic_gard_norm()
                 if not args.debug:
