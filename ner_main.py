@@ -97,7 +97,22 @@ def main():
         model = NERSLModel(
                     vocab,
                     # Embedding
+                    args.subword,
+                    args.transliterate,
                     args.bert_path,
+                    args.position_emb_dropout,
+                    args.bert_emb_dropout,
+                    args.emb_dropout,
+                    args.d_model,
+                    args.partition,
+                    args.layer_num,
+                    args.hidden_dropout,
+                    args.attention_dropout,
+                    args.dim_ff,
+                    args.nhead,
+                    args.kqv_dim,
+                    # classifier
+                    args.label_hidden,
                     args.device
                 ).cuda()
     elif args.name == 'NERSpanModel':

@@ -7,7 +7,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Neural model for NLP')
 
     # [Data]
-    parser.add_argument('--input', type=str, default='./data/onto/joint_char/', help='path of input data')
+    parser.add_argument('--joint_input', type=str, default='./data/onto/joint_char/', help='path of input data')
+    parser.add_argument('--parsing_input', type=str, default='./data/onto/parsing_char/', help='path of input data')
     parser.add_argument('--language', type=str, choices=['chinese', 'arabic', 'english'], default='chinese', help='language')
     parser.add_argument('--transliterate', default='', type=str, help='whether to transliterate when using BERT/XLNet')
 
@@ -16,8 +17,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--seed', default=2021, type=int, help='seed of random')
     parser.add_argument('--cuda', default=True, type=bool, help='whether to use cuda')
     parser.add_argument('--gpuid', default=1, type=int, help='id of gpu')
-    parser.add_argument('--batch_size', default=8, type=int, help='how many insts per batch to load')
-    parser.add_argument('--accum_steps', default=2, type=int, help='the number of accumulated steps before backward')
+    parser.add_argument('--batch_size', default=4, type=int, help='how many insts per batch to load')
+    parser.add_argument('--accum_steps', default=4, type=int, help='the number of accumulated steps before backward')
     parser.add_argument('--shuffle', default=True, type=bool, help='set True to get the data reshuffled at every epoch')
     parser.add_argument('--drop_last', default=False, type=bool, help='whether to drop the last data')
     parser.add_argument('--num_workers', default=2, type=int, help='how many subprocesses to use for data loading')
@@ -25,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--log_interval', default=200, type=int, help='interval on print log info')
     parser.add_argument('--eval_interval', default=1200, type=int, help='interval on print evaluate model')
     parser.add_argument('--early_stop', default=True, type=bool, help='early stop')
-    parser.add_argument('--patience', default=3, type=int, help='early stop patience epoch')
+    parser.add_argument('--patience', default=4, type=int, help='early stop patience epoch')
     parser.add_argument('--save', default=False, type=bool, help='whether to save model')
 
     # [Optimizer]
@@ -62,14 +63,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--label_hidden', default=1250, type=int, help='dimention of label_hidden')
 
     # [Loss]
-    parser.add_argument('--lambda_scaler', default=0.8, type=float, help='cross loss scaler')
+    parser.add_argument('--lambda_scaler', default=0.3, type=float, help='parsing and ner loss scaler')
+    parser.add_argument('--alpha_scaler', default=0.1, type=float, help='parsing and ner loss scaler')
 
     # [Evaluation]
     parser.add_argument('--evalb_path', default='./EVALB_SPMRL/', type=str, help='path of evaluation script')
 
     # [Constants]
     parser.add_argument('--DATASET_MAX_SNT_LENGTH', default=200, type=str, help='when sentence length larger than it, drop it')
-    parser.add_argument('--BATCH_MAX_SNT_LENGTH', default=100, type=str, help='when sentence max len bigger than it, split batch to sub-batch')
+    parser.add_argument('--BATCH_MAX_SNT_LENGTH', default=80, type=str, help='when sentence max len bigger than it, split batch to sub-batch')
 
     args = parser.parse_args()
     return args

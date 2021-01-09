@@ -14,12 +14,27 @@ from model.partition_transformer import PartitionTransformer
 
 
 class NERSLModel(nn.Module):
-    def __init__(self, vocab: Vocab, bert_path: str, device: torch.device):
+    def __init__(self, vocab: Vocab, subword: str, transliterate: str, bert_path: str, position_emb_dropout: float,
+                 bert_emb_dropout: float, emb_dropout: float, d_model: int, partition: bool, layer_num: int,
+                 hidden_dropout: float, attention_dropout: float, dim_ff: int, nhead: int, kqv_dim: int,
+                 label_hidden: int, device: torch.device):
         super(NERSLModel, self).__init__()
 
-        self.BERT = BertModel.from_pretrained(bert_path)
-        self.tokenizer = BertTokenizerFast.from_pretrained(bert_path)
-        self.bert_proj = nn.Linear(768, len(vocab))
+        # self.BERT = BertModel.from_pretrained(bert_path)
+        # self.tokenizer = BertTokenizerFast.from_pretrained(bert_path)
+        # self.bert_proj = nn.Linear(768, len(vocab))
+
+        self.encoder = NEREncoder(
+            subword, transliterate, bert_path, d_model, partition, position_emb_dropout, bert_emb_dropout, emb_dropout,
+            layer_num, hidden_dropout, attention_dropout, dim_ff, nhead, kqv_dim, device
+        )
+        self.label_classifier = nn.Sequential(
+            nn.Linear(d_model, label_hidden),
+            nn.LayerNorm(label_hidden),
+            nn.ReLU(),
+            nn.Linear(label_hidden, len(vocab))
+        )
+
         self.crf = CRF(len(vocab), 0)
         self.vocab = vocab
         self.device = device
@@ -32,9 +47,10 @@ class NERSLModel(nn.Module):
             loss or res
         """
         snts = insts['snts']
-        ids, masks, batch_size, seq_len = self.__tokenize(snts)
-        bert_embeddings = self.BERT(ids, attention_mask=masks)[0][:, 1:-1, :]  # [batch_size, seq_len, dim]
-        assert (batch_size, seq_len) == bert_embeddings.shape[:-1]
+        snt_lens = [len(snt) for snt in snts]
+        batch_size, seq_len = len(snt_lens), max(snt_lens)
+        words_repr = self.encoder(snts)
+        assert (batch_size, seq_len) == words_repr.shape[:-1]
 
         labels = insts.get('golds', None)
         if labels is not None:
@@ -43,32 +59,36 @@ class NERSLModel(nn.Module):
                 label + [self.vocab.encode('O')]*(seq_len-len(label))
                 for label in labels
             ], device=self.device)
-        crf_dict = self.crf(self.bert_proj(bert_embeddings), masks[:, 2:], labels)
+        masks = torch.tensor(
+            [[1]*snt_len+[0]*(seq_len-snt_len) for snt_len in snt_lens],
+            dtype=torch.long, device=self.device
+        )
+        crf_dict = self.crf(self.label_classifier(words_repr), masks, labels)
 
         if not self.training:
             return self.vocab.decode(crf_dict['predicted_tags'])
         else:
             return crf_dict['loss']
 
-    def __tokenize(self, snts: List[List[str]]) -> Tuple[torch.Tensor, torch.Tensor, int, int]:
-        seq_len_list = [len(snt) for snt in snts]
-        batch_size, seq_len = len(snts), max(seq_len_list)
+    # def __tokenize(self, snts: List[List[str]]) -> Tuple[torch.Tensor, torch.Tensor, int, int]:
+    #     seq_len_list = [len(snt) for snt in snts]
+    #     batch_size, seq_len = len(snts), max(seq_len_list)
 
-        # tokenize sentences
-        tokens = self.tokenizer(
-            [' '.join(snt) for snt in snts], padding=PAD_STATEGY, max_length=512, truncation=TRUNCATION_STATEGY,
-            return_attention_mask=True
-        )
-        ids, attention_mask = tokens['input_ids'], tokens['attention_mask']
+    #     # tokenize sentences
+    #     tokens = self.tokenizer(
+    #         [' '.join(snt) for snt in snts], padding=PAD_STATEGY, max_length=512, truncation=TRUNCATION_STATEGY,
+    #         return_attention_mask=True
+    #     )
+    #     ids, attention_mask = tokens['input_ids'], tokens['attention_mask']
 
-        for mask, snt_len in zip(attention_mask, seq_len_list):
-            assert sum(mask) == snt_len+2
+    #     for mask, snt_len in zip(attention_mask, seq_len_list):
+    #         assert sum(mask) == snt_len+2
 
-        return (
-            torch.tensor(ids, dtype=torch.long, device=self.device),
-            torch.tensor(attention_mask, dtype=torch.long, device=self.device),
-            batch_size, seq_len
-        )
+    #     return (
+    #         torch.tensor(ids, dtype=torch.long, device=self.device),
+    #         torch.tensor(attention_mask, dtype=torch.long, device=self.device),
+    #         batch_size, seq_len
+    #     )
 
     def pack_state_dict(self):
         """generate state_dict when save the model.
@@ -79,13 +99,13 @@ class NERSLModel(nn.Module):
 
 
 class NERSpanModel(nn.Module):
-    def __init__(self, subword, transliterate, bert_path: str, position_emb_dropout: float,
+    def __init__(self, subword: str, transliterate: str, bert_path: str, position_emb_dropout: float,
                  bert_emb_dropout: float, emb_dropout: float, d_model: int, partition: bool, layer_num: int,
                  hidden_dropout: float, attention_dropout: float, dim_ff: int, nhead: int, kqv_dim: int,
                  label_hidden: int, device: torch.device):
         super(NERSpanModel, self).__init__()
 
-        self.encoder = NERSpanEncoder(
+        self.encoder = NEREncoder(
             subword, transliterate, bert_path, d_model, partition, position_emb_dropout, bert_emb_dropout, emb_dropout,
             layer_num, hidden_dropout, attention_dropout, dim_ff, nhead, kqv_dim, device
         )
@@ -220,12 +240,12 @@ class NERSpanModel(nn.Module):
         pass
 
 
-class NERSpanEncoder(nn.Module):
+class NEREncoder(nn.Module):
     def __init__(self, subword: str, transliterate: str, bert_path: str, d_model: int, partition: bool,
                  position_emb_dropout: float, bert_emb_dropout: float, emb_dropout: float, layer_num: int,
                  hidden_dropout: float, attention_dropout: float, dim_ff: int, nhead: int, kqv_dim: int,
                  device: torch.device):
-        super(NERSpanEncoder, self).__init__()
+        super(NEREncoder, self).__init__()
 
         self.BERT = BertModel.from_pretrained(bert_path)
         self.tokenizer = BertTokenizerFast.from_pretrained(bert_path)
