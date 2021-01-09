@@ -1,1 +1,1 @@
-(A (B( 我)) (NamedEntity-ORG(D( 我)) (F( 我))))
+(S (A (P this)) (B (Q is) (A (R a) (T test))) (-NONE- *))

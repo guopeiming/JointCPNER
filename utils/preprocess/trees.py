@@ -109,7 +109,10 @@ class Tree(object):
 
     def change_label(self, span_label: str):
         if not self.is_leaf:
-            assert '-' not in self.label or ('POSTAG' in self.label and self.label.count('-') == 1)
+            assert '-' not in self.label\
+                or ('POSTAG' in self.label and self.label.count('-') == 1) \
+                or (self.label in (
+                    'POSTAG--LRB-', 'POSTAG--RRB-', 'POSTAG--LCB-', 'POSTAG--RCB-', 'POSTAG--LSB-', 'POSTAG--RSB-'))
             self.label = self.label + '-' + span_label
             for child in self.children:
                 child.change_label(span_label)
@@ -120,6 +123,13 @@ class Tree(object):
         else:
             text = ' '.join([child.linearize() for child in self.children])
         return '(%s %s)' % (self.label, text)
+
+    # def linearize_pos(self):
+    #     if self.is_leaf:
+    #         return '(POSTAG-%s (PAD_TAG %s))' % (self.label, self.word)
+    #     else:
+    #         text = ' '.join([child.linearize_pos() for child in self.children])
+    #         return '(%s %s)' % (self.label, text)
 
     def leaves(self):
         if self.is_leaf:
@@ -187,3 +197,10 @@ def build_tree(tokens: List[str], idx: int, span_startpoint_idx: int):
 
     assert tokens[idx] == ')'
     return tree, idx+1, span_endpoint_idx
+
+
+# if __name__ == '__main__':
+#     trees = load_trees('./data/onto/parsing_en/train.corpus')
+#     with open('./data/onto/parsing_en_pos/train.corpus', 'w', encoding='utf-8') as writer:
+#         for tree in trees:
+#             writer.write(tree.linearize_pos()+'\n')

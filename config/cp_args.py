@@ -7,7 +7,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Neural model for NLP')
 
     # [Data]
-    parser.add_argument('--input', type=str, default='./data/onto/parsing_en/', help='path of input data')
+    parser.add_argument('--input', type=str, default='./data/onto/parsing_en_pos/', help='path of input data')
     parser.add_argument('--language', type=str, choices=['chinese', 'arabic', 'english'], default='english', help='language')
     parser.add_argument('--transliterate', default='', type=str, help='whether to transliterate when using BERT/XLNet')
 
@@ -15,7 +15,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--debug', default=False, type=bool, help='debug mode')
     parser.add_argument('--seed', default=2021, type=int, help='seed of random')
     parser.add_argument('--cuda', default=True, type=bool, help='whether to use cuda')
-    parser.add_argument('--gpuid', default=4, type=int, help='id of gpu')
+    parser.add_argument('--gpuid', default=0, type=int, help='id of gpu')
     parser.add_argument('--batch_size', default=16, type=int, help='how many insts per batch to load')
     parser.add_argument('--accum_steps', default=1, type=int, help='the number of accumulated steps before backward')
     parser.add_argument('--shuffle', default=True, type=bool, help='set True to get the data reshuffled at every epoch')
@@ -61,7 +61,7 @@ def parse_args() -> argparse.Namespace:
     # [Model-classifier]
     parser.add_argument('--label_hidden', default=800, type=int, help='dimention of label_hidden')
     # [Evaluation]
-    parser.add_argument('--evalb_path', default='./EVALB/', type=str, help='path of evaluation script')
+    parser.add_argument('--evalb_path', default='./EVALB_SPMRL/', type=str, help='path of evaluation script')
 
     # [Constants]
     parser.add_argument('--DATASET_MAX_SNT_LENGTH', default=200, type=str, help='when sentence length larger than it, drop it')

@@ -1,1 +1,1 @@
-(A (B(O 我)) (D(O 我)) (F(O 我)))
+(S (A (P this)) (B (Q is) (A (R a) (T test))) (-NONE- *))

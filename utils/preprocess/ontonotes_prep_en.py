@@ -163,8 +163,8 @@ def convert_ner_dataset():
 def match_ner_cp():
     match_counter, conti_counter, not_match_counter = Counter(), Counter(), Counter()
     match, conti_match, not_match = 0, 0, 0
-    trees = load_trees('./data/onto/parsing_en/train.corpus')
-    ner_snts, ner_golds = load_data_from_file('./data/onto/ner_en/train.corpus')
+    trees = load_trees('./data/onto/parsing_en/test.corpus')
+    ner_snts, ner_golds = load_data_from_file('./data/onto/ner_en/test.corpus')
     assert len(trees) == len(ner_snts)
     with open('./not_mach.txt', 'w', encoding='utf-8') as writer:
         for snt, ner_gold, tree in zip(ner_snts, ner_golds, trees):
@@ -172,7 +172,7 @@ def match_ner_cp():
             assert len(list(tree.leaves())) == len(snt)
             spans = _bio_tag_to_spans(ner_gold)
             for span in spans:
-                match_type = tree.ner_match(span[1][0], span[1][1])
+                match_type = tree.ner_match(span[1][0], span[1][1], False, False)
                 if match_type == 0:
                     not_match += 1
                     not_match_counter.update([span[0]])
@@ -192,14 +192,14 @@ def match_ner_cp():
     print(not_match_counter)
 
 
-def convert_joint_data_char(data: str, up: bool):
+def convert_joint_data(data: str, up: bool):
     root_dir = './data/onto'
     dataset = data + '.corpus'
-    trees = load_trees(os.path.join(root_dir, 'parsing_char', dataset))
-    ner_snts, ner_golds = load_data_from_file(os.path.join(root_dir, 'ner_char', dataset))
+    trees = load_trees(os.path.join(root_dir, 'parsing_en_pos', dataset))
+    ner_snts, ner_golds = load_data_from_file(os.path.join(root_dir, 'ner_en', dataset))
     match, conti_match, not_match = 0, 0, 0
 
-    with open(os.path.join(root_dir, 'temp', dataset), 'w', encoding='utf-8') as writer:
+    with open(os.path.join(root_dir, 'joint_en_pos', dataset), 'w', encoding='utf-8') as writer:
         assert len(trees) == len(ner_snts)
         for snt, ner_gold, tree in zip(ner_snts, ner_golds, trees):
             snt, ner_gold = snt.split(), ner_gold.split()
@@ -222,16 +222,15 @@ def convert_joint_data_char(data: str, up: bool):
     print(match, conti_match, not_match, not_match/(not_match+match+conti_match))
 
 
-def convert_joint_dataset_char():
-    convert_joint_data_char('train', False)
-    convert_joint_data_char('dev', False)
-    convert_joint_data_char('test', False)
+def convert_joint_dataset():
+    convert_joint_data('train', False)
+    convert_joint_data('dev', False)
+    convert_joint_data('test', False)
 
 
 if __name__ == '__main__':
     # generate_onto_cropus()
-    convert_parsing_dataset()
-    convert_ner_dataset()
-    # convert_parsing_dataset_char()
+    # convert_parsing_dataset()
+    # convert_ner_dataset()
     # match_ner_cp()
-    # convert_joint_dataset_char()
+    convert_joint_dataset()

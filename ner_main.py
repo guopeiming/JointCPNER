@@ -10,7 +10,7 @@ import datetime
 import numpy as np
 from utils.optim import Optim
 from utils import ner_evaluate
-from model.NERModel import NERSLModel, NERSpanModel
+from model.NERModel import NERSLModel, NERSpanModel, NERBERTCRF
 from typing import Tuple, List, Dict
 from config.ner_args import parse_args
 from torch.utils.data import DataLoader
@@ -45,7 +45,9 @@ def preprocess() -> argparse.Namespace:
     # ====== cuda enable ====== #
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpuid)
     args.device = torch.device('cuda') if args.cuda and torch.cuda.is_available() else torch.device('cpu')
+    # ====== others ====== #
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+    torch.set_num_threads(4)
     print(args, end='\n\n')
     return args
 
@@ -93,7 +95,16 @@ def main():
     # ======= Preparing Model ======= #
     print("\nModel Preparing starts...")
     model = None
-    if args.name == 'NERSLModel':
+    if args.name == 'NERBERTCRF':
+        model = NERBERTCRF(
+                    vocab,
+                    # Embedding
+                    args.subword,
+                    args.transliterate,
+                    args.bert_path,
+                    args.device
+                ).cuda()
+    elif args.name == 'NERSLModel':
         model = NERSLModel(
                     vocab,
                     # Embedding
