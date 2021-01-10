@@ -483,14 +483,14 @@ class EmbeddingLayer(nn.Module):
                 startpoint = torch.nonzero(startpoint_idx[i]).squeeze(1)
                 endpoint = torch.nonzero(endpoint_idx[i]).squeeze(1)
                 words_length = torch.add(endpoint - startpoint, 1).tolist()
-                assert len(words_length) == len(snts[i]+2) or (len(words_length) == len(snts[i])+3)
+                assert len(words_length) == len(snts[i])+2 or (len(words_length) == len(snts[i])+3)
                 # if do not drop the last word representation, we can not deal the situation
                 # that is showed in if sentence above.
                 # (if self.subword == 'startpoint' or self.subword == 'endpoint':)
                 # in details.
                 # the sentence is the longest raw sentence, but it is not the longes one
                 # after tokenization.
-                if len(words_length) == snts[i] + 3:
+                if len(words_length) == len(snts[i]) + 3:
                     last_word_len = words_length[-1]
                     words_length = words_length[:-1]
                     snt_bert_embeddings = bert_embeddings[i, :-last_word_len, :]
@@ -498,10 +498,12 @@ class EmbeddingLayer(nn.Module):
                     snt_bert_embeddings = bert_embeddings[i, :, :]
                 assert sum(words_length) == snt_bert_embeddings.shape[0]
                 words_repr_list = torch.split(snt_bert_embeddings, words_length, dim=0)
-                words_repr = torch.cat([
-                    self.pool(word_repr.permute(1, 0)).permute(1, 0) for word_repr in words_repr_list] +
-                    [torch.zeros(seq_len-len(words_repr_list), self.bert_hidden_size, device=self.device)], dim=0)
-                bert_embeddings_list.append(words_repr.unsqueeze(0))
+                words_repr = torch.cat(
+                    [self.pool(word_repr.unsqueeze(0).permute(0, 2, 1)).permute(0, 2, 1)
+                     for word_repr in words_repr_list] +
+                    [torch.zeros(1, seq_len-len(words_repr_list), self.bert_hidden_size, device=self.device)], dim=1
+                )
+                bert_embeddings_list.append(words_repr)
             bert_embeddings = torch.cat(bert_embeddings_list, dim=0)
         else:
             print('subword method (%s) is illegal' % self.subword)

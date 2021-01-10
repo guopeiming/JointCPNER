@@ -20,7 +20,7 @@ def generate_collection_english(tag="train"):
     """
     results = itertools.chain.from_iterable(
         glob.iglob(os.path.join(root, '*.v4_gold_conll'))
-        for root, dirs, files in os.walk('./data/conll-2012/v4/data/english/'+tag)
+        for root, dirs, files in os.walk('./data/conll-2012/v4/data/'+tag+'/data/'+'english/')
     )
 
     with open('./data/onto/english_origin/'+tag+".corpus", 'w', encoding='utf-8') as writer:
@@ -163,10 +163,10 @@ def convert_ner_dataset():
 def match_ner_cp():
     match_counter, conti_counter, not_match_counter = Counter(), Counter(), Counter()
     match, conti_match, not_match = 0, 0, 0
-    trees = load_trees('./data/onto/parsing_en/test.corpus')
-    ner_snts, ner_golds = load_data_from_file('./data/onto/ner_en/test.corpus')
+    trees = load_trees('./data/onto/parsing_en/train.corpus')
+    ner_snts, ner_golds = load_data_from_file('./data/onto/ner_en/train.corpus')
     assert len(trees) == len(ner_snts)
-    with open('./not_mach.txt', 'w', encoding='utf-8') as writer:
+    with open('./not_mach.txt', 'w', encoding='utf-8') as writer:  #, open('./data/onto/temp/train.corpus', 'w', encoding='utf-8') as ner_writer:
         for snt, ner_gold, tree in zip(ner_snts, ner_golds, trees):
             snt, ner_gold = snt.split(), ner_gold.split()
             assert len(list(tree.leaves())) == len(snt)
@@ -175,6 +175,12 @@ def match_ner_cp():
                 match_type = tree.ner_match(span[1][0], span[1][1], False, False)
                 if match_type == 0:
                     not_match += 1
+
+                    # ======================================
+                    # for i in range(span[1][0], span[1][1]):
+                    #     ner_gold[i] = 'O'
+                    # ======================================
+
                     not_match_counter.update([span[0]])
                     writer.write('\t'.join([span[0], ''.join(snt[span[1][0]:span[1][1]]), tree.linearize().replace('(', '[').replace(')', ']')+'\n']))
                 elif match_type == 1:
@@ -186,6 +192,14 @@ def match_ner_cp():
                 else:
                     print('error')
                     exit(-1)
+
+            # ======================================
+            # assert len(snt) == len(ner_gold)
+            # for char, ner in zip(snt, ner_gold):
+            #     ner_writer.write(char+'\t'+ner+'\n')
+            # ner_writer.write('\n')
+            # ======================================
+
     print(match, conti_match, not_match, not_match/(not_match+match+conti_match))
     print(match_counter)
     print(conti_counter)
@@ -195,11 +209,11 @@ def match_ner_cp():
 def convert_joint_data(data: str, up: bool):
     root_dir = './data/onto'
     dataset = data + '.corpus'
-    trees = load_trees(os.path.join(root_dir, 'parsing_en_pos', dataset))
+    trees = load_trees(os.path.join(root_dir, 'parsing_en', dataset))
     ner_snts, ner_golds = load_data_from_file(os.path.join(root_dir, 'ner_en', dataset))
     match, conti_match, not_match = 0, 0, 0
 
-    with open(os.path.join(root_dir, 'joint_en_pos', dataset), 'w', encoding='utf-8') as writer:
+    with open(os.path.join(root_dir, 'joint_en', dataset), 'w', encoding='utf-8') as writer:
         assert len(trees) == len(ner_snts)
         for snt, ner_gold, tree in zip(ner_snts, ner_golds, trees):
             snt, ner_gold = snt.split(), ner_gold.split()

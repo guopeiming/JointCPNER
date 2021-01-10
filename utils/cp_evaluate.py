@@ -1,5 +1,6 @@
 # @Author : guopeiming
 # @Contact : guopeiming.gpm@{qq, gmail}.com
+from config.Constants import CHARACTER_BASED, LANGS_NEED_SEG
 from typing import List, Set, Tuple, Dict, Union
 from queue import Queue
 from utils import evaluate
@@ -39,8 +40,26 @@ class JointFScore(object):
             )
 
 
-def cal_preformence(evalb_path: str, trees_gold: List[InternalParseNode], trees_pred: List[InternalParseNode])\
-        -> Tuple[JointFScore, Dict[str, List[Union[InternalTreebankNode, Set[Tuple[str, Tuple[int, int]]]]]]]:
+def cal_performance(
+    language: str, subword: str, evalb_path: str, trees_gold: List[InternalParseNode],
+    trees_pred: List[InternalParseNode]
+):
+    if language in LANGS_NEED_SEG and subword == CHARACTER_BASED:
+        return cal_performance_seg_pos_par(evalb_path, trees_gold, trees_pred)
+    elif language in LANGS_NEED_SEG and subword != CHARACTER_BASED:
+        return cal_performance_pos_par(evalb_path, trees_gold, trees_pred)
+    elif 
+
+
+def cal_performance_pos_par(
+    evalb_path: str, trees_gold: List[InternalParseNode], trees_pred: List[InternalParseNode]
+) -> Tuple[JointFScore, Dict[str, List[Union[InternalTreebankNode, Set[Tuple[str, Tuple[int, int]]]]]]]:
+        pass
+
+
+def cal_performance_seg_pos_par(
+    evalb_path: str, trees_gold: List[InternalParseNode], trees_pred: List[InternalParseNode]
+) -> Tuple[JointFScore, Dict[str, List[Union[InternalTreebankNode, Set[Tuple[str, Tuple[int, int]]]]]]]:
     """joint cal perf.
     Args:
         evab_path:

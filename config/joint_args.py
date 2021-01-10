@@ -24,7 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--num_workers', default=2, type=int, help='how many subprocesses to use for data loading')
     parser.add_argument('--epoch', default=35, type=int, help='max training epoch')
     parser.add_argument('--log_interval', default=200, type=int, help='interval on print log info')
-    parser.add_argument('--eval_interval', default=2400, type=int, help='interval on print evaluate model')
+    parser.add_argument('--eval_interval', default=1600, type=int, help='interval on print evaluate model')
     parser.add_argument('--early_stop', default=True, type=bool, help='early stop')
     parser.add_argument('--patience', default=4, type=int, help='early stop patience epoch')
     parser.add_argument('--save', default=False, type=bool, help='whether to save model')
