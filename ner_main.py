@@ -10,7 +10,7 @@ import datetime
 import numpy as np
 from utils.optim import Optim
 from utils import ner_evaluate
-from model.NERModel import NERSLModel, NERSpanModel, NERBERTCRF
+from model.NERModel import BertCRFNER, BertEncoderNER, BertNER, SpanNER
 from typing import Tuple, List, Dict
 from config.ner_args import parse_args
 from torch.utils.data import DataLoader
@@ -77,7 +77,7 @@ def eval_model(model: torch.nn.Module, dataset: DataLoader, language: str, DATAS
             tags_gold.extend(tags_batch_gold)
 
     assert len(tags_pred) == len(tags_gold)
-    fscore = ner_evaluate.cal_preformence(tags_pred, tags_gold)
+    fscore = ner_evaluate.cal_performance(tags_pred, tags_gold)
     print('Model performance in %s dataset: metric: %s' % (type_, fscore))
     torch.cuda.empty_cache()
     return fscore, {'snts': snts, 'pred_tags': tags_pred, 'gold_tags': tags_gold}
@@ -95,39 +95,19 @@ def main():
     # ======= Preparing Model ======= #
     print("\nModel Preparing starts...")
     model = None
-    if args.name == 'NERBERTCRF':
-        model = NERBERTCRF(
-                    vocab,
-                    # Embedding
-                    args.subword,
-                    args.transliterate,
-                    args.bert_path,
-                    args.device
-                ).cuda()
-    elif args.name == 'NERSLModel':
-        model = NERSLModel(
-                    vocab,
-                    # Embedding
-                    args.subword,
-                    args.transliterate,
-                    args.bert_path,
-                    args.position_emb_dropout,
-                    args.bert_emb_dropout,
-                    args.emb_dropout,
-                    args.d_model,
-                    args.partition,
-                    args.layer_num,
-                    args.hidden_dropout,
-                    args.attention_dropout,
-                    args.dim_ff,
-                    args.nhead,
-                    args.kqv_dim,
-                    # classifier
-                    args.label_hidden,
-                    args.device
-                ).cuda()
-    elif args.name == 'NERSpanModel':
-        model = NERSpanModel(
+    if args.name == 'BertCRFNER':
+        model = BertCRFNER(
+            vocab,
+            # Embedding
+            args.subword,
+            args.transliterate,
+            args.bert_path,
+            args.bert_emb_dropout,
+            args.device
+        ).cuda()
+    elif args.name == 'BertEncoderNER':
+        model = BertEncoderNER(
+            vocab,
             # Embedding
             args.subword,
             args.transliterate,
@@ -145,6 +125,37 @@ def main():
             args.kqv_dim,
             # classifier
             args.label_hidden,
+            args.device
+        ).cuda()
+    elif args.name == 'SpanNER':
+        model = SpanNER(
+            # Embedding
+            args.subword,
+            args.transliterate,
+            args.bert_path,
+            args.position_emb_dropout,
+            args.bert_emb_dropout,
+            args.emb_dropout,
+            args.d_model,
+            args.partition,
+            args.layer_num,
+            args.hidden_dropout,
+            args.attention_dropout,
+            args.dim_ff,
+            args.nhead,
+            args.kqv_dim,
+            # classifier
+            args.label_hidden,
+            args.device
+        ).cuda()
+    elif args.name == 'BertNER':
+        model = BertNER(
+            vocab,
+            # Embedding
+            args.subword,
+            args.transliterate,
+            args.bert_path,
+            args.bert_emb_dropout,
             args.device
         ).cuda()
     else:

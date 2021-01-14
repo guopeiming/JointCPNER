@@ -60,7 +60,7 @@ def postprocess(args: argparse.Namespace, start: float):
 
 
 @torch.no_grad()
-def eval_model(model: torch.nn.Module, dataset: DataLoader, language: str, DATASET_MAX_SNT_LENGTH: int,
+def eval_model(model: torch.nn.Module, dataset: DataLoader, language: str, subword: str, DATASET_MAX_SNT_LENGTH: int,
                BATCH_MAX_SNT_LENGTH: int, evalb_path: str, type_: str)\
         -> Tuple[joint_evaluate.JointFScore,
                  Dict[str, List[Union[InternalTreebankNode, Set[Tuple[str, Tuple[int, int]]]]]]]:
@@ -76,7 +76,7 @@ def eval_model(model: torch.nn.Module, dataset: DataLoader, language: str, DATAS
             trees_gold.extend(trees_batch_gold)
 
     assert len(trees_pred) == len(trees_gold)
-    joint_fscore, res_dict = joint_evaluate.cal_preformence(evalb_path, trees_gold, trees_pred)
+    joint_fscore, res_dict = joint_evaluate.cal_performance(language, subword, evalb_path, trees_gold, trees_pred)
     print('Model performance in %s dataset: JointFScore: %s' % (type_, joint_fscore))
     torch.cuda.empty_cache()
     return joint_fscore, res_dict
@@ -176,11 +176,13 @@ def main():
             if steps % (args.accum_steps * args.eval_interval) == 0:
                 print('model evaluating starts...', flush=True)
                 joint_fscore_dev, res_data_dev = eval_model(
-                    model, dev_data, args.language, args.DATASET_MAX_SNT_LENGTH, args.BATCH_MAX_SNT_LENGTH,
-                    args.evalb_path, 'dev')
+                    model, dev_data, args.language, args.subword, args.DATASET_MAX_SNT_LENGTH,
+                    args.BATCH_MAX_SNT_LENGTH, args.evalb_path, 'dev'
+                )
                 joint_fscore_test, res_data_test = eval_model(
-                    model, test_data, args.language, args.DATASET_MAX_SNT_LENGTH, args.BATCH_MAX_SNT_LENGTH,
-                    args.evalb_path, 'test')
+                    model, test_data, args.language, args.subword, args.DATASET_MAX_SNT_LENGTH,
+                    args.BATCH_MAX_SNT_LENGTH, args.evalb_path, 'test'
+                )
                 visual_dic = {
                     'F/parsing_dev': joint_fscore_dev.parsing_f, 'F/parsing_test': joint_fscore_test.parsing_f,
                     'F/ner_dev': joint_fscore_dev.ner_f, 'F/ner_test': joint_fscore_test.ner_f

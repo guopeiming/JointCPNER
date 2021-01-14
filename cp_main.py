@@ -60,7 +60,7 @@ def postprocess(args: argparse.Namespace, start: float):
 
 
 @torch.no_grad()
-def eval_model(model: torch.nn.Module, dataset: DataLoader, language: str, DATASET_MAX_SNT_LENGTH: int,
+def eval_model(model: torch.nn.Module, dataset: DataLoader, language: str, subword: str, DATASET_MAX_SNT_LENGTH: int,
                BATCH_MAX_SNT_LENGTH: int, evalb_path: str, type_: str)\
         -> Tuple[cp_evaluate.JointFScore, List[InternalTreebankNode], List[InternalTreebankNode]]:
     trees_pred, trees_gold = [], []
@@ -75,7 +75,7 @@ def eval_model(model: torch.nn.Module, dataset: DataLoader, language: str, DATAS
             trees_gold.extend(trees_batch_gold)
 
     assert len(trees_pred) == len(trees_gold)
-    eval_fscore, res_dict = cp_evaluate.cal_preformence(evalb_path, trees_gold, trees_pred)
+    eval_fscore, res_dict = cp_evaluate.cal_performance(language, subword, evalb_path, trees_gold, trees_pred)
     print('Model performance in %s dataset: JointScore: %s' % (type_, eval_fscore))
     torch.cuda.empty_cache()
     return eval_fscore, res_dict['pred_trees'], res_dict['gold_trees']
@@ -167,11 +167,13 @@ def main():
             if steps % (args.accum_steps * args.eval_interval) == 0:
                 print('model evaluating starts...', flush=True)
                 fscore_dev, pred_dev, gold_dev = eval_model(
-                    model, dev_data, args.language, args.DATASET_MAX_SNT_LENGTH, args.BATCH_MAX_SNT_LENGTH,
-                    args.evalb_path, 'dev')
+                    model, dev_data, args.language, args.subword, args.DATASET_MAX_SNT_LENGTH,
+                    args.BATCH_MAX_SNT_LENGTH, args.evalb_path, 'dev'
+                )
                 fscore_test, pred_test, gold_test = eval_model(
-                    model, test_data, args.language, args.DATASET_MAX_SNT_LENGTH, args.BATCH_MAX_SNT_LENGTH,
-                    args.evalb_path, 'test')
+                    model, test_data, args.language, args.subword, args.DATASET_MAX_SNT_LENGTH,
+                    args.BATCH_MAX_SNT_LENGTH, args.evalb_path, 'test'
+                )
                 visual_dic = {'F/parsing_dev': fscore_dev.parsing_f, 'F/parsing_test': fscore_test.parsing_f}
                 if not args.debug:
                     args.visual_logger.visual_scalars(visual_dic, steps // args.accum_steps)

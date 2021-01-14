@@ -5,6 +5,7 @@ import numpy as np
 import torch.nn as nn
 from model.conditional_random_field import CRF
 from utils.vocab import Vocab
+from itertools import chain
 from typing import List, Dict, Tuple, Set
 from transformers import BertModel, BertTokenizerFast
 from utils.transliterate import TRANSLITERATIONS, BERT_TOKEN_MAPPING
@@ -13,12 +14,12 @@ from model.transformer import Transformer, LearnedPositionalEmbedding
 from model.partition_transformer import PartitionTransformer
 
 
-class NERSLModel(nn.Module):
+class BertEncoderNER(nn.Module):
     def __init__(self, vocab: Vocab, subword: str, transliterate: str, bert_path: str, position_emb_dropout: float,
                  bert_emb_dropout: float, emb_dropout: float, d_model: int, partition: bool, layer_num: int,
                  hidden_dropout: float, attention_dropout: float, dim_ff: int, nhead: int, kqv_dim: int,
                  label_hidden: int, device: torch.device):
-        super(NERSLModel, self).__init__()
+        super(BertEncoderNER, self).__init__()
 
         self.encoder = NEREncoder(
             subword, transliterate, bert_path, d_model, partition, position_emb_dropout, bert_emb_dropout, emb_dropout,
@@ -66,26 +67,6 @@ class NERSLModel(nn.Module):
         else:
             return crf_dict['loss']
 
-    # def __tokenize(self, snts: List[List[str]]) -> Tuple[torch.Tensor, torch.Tensor, int, int]:
-    #     seq_len_list = [len(snt) for snt in snts]
-    #     batch_size, seq_len = len(snts), max(seq_len_list)
-
-    #     # tokenize sentences
-    #     tokens = self.tokenizer(
-    #         [' '.join(snt) for snt in snts], padding=PAD_STATEGY, max_length=512, truncation=TRUNCATION_STATEGY,
-    #         return_attention_mask=True
-    #     )
-    #     ids, attention_mask = tokens['input_ids'], tokens['attention_mask']
-
-    #     for mask, snt_len in zip(attention_mask, seq_len_list):
-    #         assert sum(mask) == snt_len+2
-
-    #     return (
-    #         torch.tensor(ids, dtype=torch.long, device=self.device),
-    #         torch.tensor(attention_mask, dtype=torch.long, device=self.device),
-    #         batch_size, seq_len
-    #     )
-
     def pack_state_dict(self):
         """generate state_dict when save the model.
         Returns:
@@ -94,12 +75,14 @@ class NERSLModel(nn.Module):
         pass
 
 
-class NERBERTCRF(nn.Module):
+class BertCRFNER(nn.Module):
 
-    def __init__(self, vocab: Vocab, subword: str, transliterate: str, bert_path: str, device: torch.device):
-        super(NERBERTCRF, self).__init__()
+    def __init__(self, vocab: Vocab, subword: str, transliterate: str, bert_path: str, bert_emb_dropout: float,
+                 device: torch.device):
+        super(BertCRFNER, self).__init__()
 
         self.bert_encoder = BERTEncoder(subword, transliterate, bert_path, device)
+        self.bert_dropout = nn.Dropout(bert_emb_dropout)
 
         self.bert_proj = nn.Linear(self.bert_encoder.BERT.config.hidden_size, len(vocab))
 
@@ -126,7 +109,7 @@ class NERBERTCRF(nn.Module):
             [[1]*snt_len+[0]*(seq_len-snt_len) for snt_len in snt_lens],
             dtype=torch.long, device=self.device
         )
-        crf_dict = self.crf(self.bert_proj(words_repr), masks, labels)
+        crf_dict = self.crf(self.bert_proj(self.bert_dropout(words_repr)), masks, labels)
 
         if not self.training:
             return self.vocab.decode(crf_dict['predicted_tags'])
@@ -134,12 +117,52 @@ class NERBERTCRF(nn.Module):
             return crf_dict['loss']
 
 
-class NERSpanModel(nn.Module):
+class BertNER(nn.Module):
+
+    def __init__(self, vocab: Vocab, subword: str, transliterate: str, bert_path: str, bert_emb_dropout: float,
+                 device: torch.device):
+        super(BertNER, self).__init__()
+
+        self.bert_encoder = BERTEncoder(subword, transliterate, bert_path, device)
+        self.bert_dropout = nn.Dropout(bert_emb_dropout)
+
+        self.bert_proj = nn.Linear(self.bert_encoder.BERT.config.hidden_size, len(vocab))
+
+        self.criterion = nn.CrossEntropyLoss(reduction='sum')
+        self.vocab = vocab
+        self.device = device
+
+    def forward(self, insts: Dict[str, List[List[str]]]):
+        snts = insts['snts']
+        words_repr = self.bert_encoder(snts)[:, 1:-1, :]  # [batch_size, seq_len, dim]
+        snt_lens = [len(snt) for snt in snts]
+        batch_size, seq_len = len(snt_lens), max(snt_lens)
+        assert (batch_size, seq_len) == words_repr.shape[:-1]
+
+        preds = self.bert_proj(self.bert_dropout(words_repr))  # [batch_size, seq_len, dim]
+
+        if not self.training:
+            _, labels = torch.max(preds, dim=2)  # [batch_size, seq_len]
+            res_tags = []
+            for i in range(batch_size):
+                res_tags.append(self.vocab.decode(labels[i, :snt_lens[i]].cpu().tolist()))
+            return res_tags
+        else:
+            labels = self.vocab.encode(insts['golds'])
+            labels = torch.tensor(list(chain.from_iterable(labels)), dtype=torch.long, device=self.device)
+            masks = torch.tensor(
+                [[1]*snt_len+[0]*(seq_len-snt_len) for snt_len in snt_lens],
+                dtype=torch.bool, device=self.device
+            )
+            return self.criterion(torch.masked_select(preds, masks.unsqueeze(-1)).view(-1, len(self.vocab)), labels)
+
+
+class SpanNER(nn.Module):
     def __init__(self, subword: str, transliterate: str, bert_path: str, position_emb_dropout: float,
                  bert_emb_dropout: float, emb_dropout: float, d_model: int, partition: bool, layer_num: int,
                  hidden_dropout: float, attention_dropout: float, dim_ff: int, nhead: int, kqv_dim: int,
                  label_hidden: int, device: torch.device):
-        super(NERSpanModel, self).__init__()
+        super(SpanNER, self).__init__()
 
         self.encoder = NEREncoder(
             subword, transliterate, bert_path, d_model, partition, position_emb_dropout, bert_emb_dropout, emb_dropout,
@@ -365,7 +388,7 @@ class BERTEncoder(nn.Module):
         if subword == 'max_pool':
             self.pool = nn.AdaptiveMaxPool1d(1)
         elif subword == 'avg_pool':
-            self.pool = nn.AdaptiveMaxPool1d(1)
+            self.pool = nn.AdaptiveAvgPool1d(1)
         else:
             self.pool = None
 
@@ -485,14 +508,15 @@ class BERTEncoder(nn.Module):
             snts_repr_list = [
                 torch.cat([
                     snt_repr.unsqueeze(0),
-                    torch.zeros((seq_len-snt_repr.shape[0], snt_repr.shape[1])).unsqueeze(0).to(self.device)], dim=1)
-                for snt_repr in snts_repr_list]
+                    torch.zeros((1, seq_len-snt_repr.shape[0], snt_repr.shape[1]), device=self.device)], dim=1)
+                for snt_repr in snts_repr_list
+            ]
             bert_embeddings = torch.cat(snts_repr_list, dim=0)  # [batch_size, seq_len, dim]
         elif self.subword == 'max_pool' or self.subword == 'avg_pool':
             bert_embeddings_list = []
             for i in range(batch_size):
-                startpoint = torch.nonzero(startpoint_idx[i]).squeeze(1)
-                endpoint = torch.nonzero(endpoint_idx[i]).squeeze(1)
+                startpoint = torch.nonzero(startpoint_idx[i], as_tuple=False).squeeze(1)
+                endpoint = torch.nonzero(endpoint_idx[i], as_tuple=False).squeeze(1)
                 words_length = torch.add(endpoint - startpoint, 1).tolist()
                 assert len(words_length) == len(snts[i])+2 or (len(words_length) == len(snts[i])+3)
                 # if do not drop the last word representation, we can not deal the situation

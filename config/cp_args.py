@@ -15,7 +15,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--debug', default=False, type=bool, help='debug mode')
     parser.add_argument('--seed', default=2021, type=int, help='seed of random')
     parser.add_argument('--cuda', default=True, type=bool, help='whether to use cuda')
-    parser.add_argument('--gpuid', default=2, type=int, help='id of gpu')
+    parser.add_argument('--gpuid', default=7, type=int, help='id of gpu')
     parser.add_argument('--batch_size', default=16, type=int, help='how many insts per batch to load')
     parser.add_argument('--accum_steps', default=1, type=int, help='the number of accumulated steps before backward')
     parser.add_argument('--shuffle', default=True, type=bool, help='set True to get the data reshuffled at every epoch')
@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--num_workers', default=2, type=int, help='how many subprocesses to use for data loading')
     parser.add_argument('--epoch', default=35, type=int, help='max training epoch')
     parser.add_argument('--log_interval', default=200, type=int, help='interval on print log info')
-    parser.add_argument('--eval_interval', default=1600, type=int, help='interval on print evaluate model')
+    parser.add_argument('--eval_interval', default=1200, type=int, help='interval on print evaluate model')
     parser.add_argument('--early_stop', default=True, type=bool, help='early stop')
     parser.add_argument('--patience', default=3, type=int, help='early stop patience epoch')
     parser.add_argument('--save', default=False, type=bool, help='whether to save model')
@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     # [Optimizer]
     parser.add_argument('--optim', default='Adam', type=str, help='optimizer used')
     parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
-    parser.add_argument('--lr_fine_tune', default=0.00002, type=float, help='fine tune learning rate')
+    parser.add_argument('--lr_fine_tune', default=0.00001, type=float, help='fine tune learning rate')
     parser.add_argument('--weight_decay', default=1e-2, type=float, help='lambda')
     parser.add_argument('--clip_grad', default=False, type=bool, help='whether to ues util.clip')
     parser.add_argument('--clip_grad_max_norm', default=4.0, type=float, help='clip_grad_max_norm')
@@ -40,11 +40,11 @@ def parse_args() -> argparse.Namespace:
 
     # [Model]
     parser.add_argument('--name', default='CPModel', type=str, help='name of model')
-    parser.add_argument('--subword', default='endpoint', type=str, choices=['character_based', 'endpoint', 'startpoint', 'max_pool', 'avg_pool'], help='the method to represent word from BERT subword')
+    parser.add_argument('--subword', default='max_pool', type=str, choices=['character_based', 'endpoint', 'startpoint', 'max_pool', 'avg_pool'], help='the method to represent word from BERT subword')
     # if language is chinese, when character-based, use_pos_tag should be False.
     parser.add_argument('--use_pos_tag', default=False, type=bool, help='whether to use pos_tag')
     # [Model-Embedding]
-    parser.add_argument('--bert_path', default='/home/data/embedding/bert-base-cased/', type=str, help='path of BERT')
+    parser.add_argument('--bert_path', default='./data/model/bert-base-cased/', type=str, help='path of BERT')
     parser.add_argument('--d_model', default=1024, type=int, help='model dimension')
     parser.add_argument('--partition', default=True, type=bool, help='whether to use content and position partition')
     parser.add_argument('--pos_tag_emb_dropout', default=0.2, type=float, help='pos tag dropout')

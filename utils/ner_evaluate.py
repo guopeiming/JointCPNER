@@ -57,7 +57,7 @@ def _bio_tag_to_spans(tags: List[str], ignore_labels=None) -> Set[Tuple[str, Tup
     return {(span[0], (span[1][0], span[1][1] + 1)) for span in spans if span[0] not in ignore_labels}
 
 
-def cal_preformence(tags_pred: List[List[str]], tags_gold: List[List[str]], ignore_labels=None) -> NERFScore:
+def cal_performance(tags_pred: List[List[str]], tags_gold: List[List[str]], ignore_labels=None) -> NERFScore:
     """计算基于span的F1、P、R.
     Args:
         tags_pred: 裁剪后的label
@@ -86,5 +86,31 @@ def cal_preformence(tags_pred: List[List[str]], tags_gold: List[List[str]], igno
 
 
 if __name__ == '__main__':
-    res = cal_preformence([['O', 'I-org', 'I-time', 'B-time']], [['O', 'O', 'O', 'O']])
+    golds = []
+    preds = []
+    with open('./logs/my_log-2021-01-13-14-27-47/dev.gold.ners', 'r', encoding='utf-8') as gold_reader:
+        gold = []
+        for line in gold_reader:
+            line = line.strip()
+            if len(line) == 0:
+                golds.append(gold)
+                gold = []
+            else:
+                word, ner = line.split('\t')
+                gold.append(ner)
+
+    with open('./logs/my_log-2021-01-13-14-27-47/dev.gold.ners', 'r', encoding='utf-8') as pred_reader:
+        pred = []
+        for line in pred_reader:
+            line = line.strip()
+            if len(line) == 0:
+                preds.append(pred)
+                pred = []
+            else:
+                word, ner = line.split('\t')
+                pred.append(ner)
+
+    res = cal_preformence(preds, golds)
     print(res)
+    # res = cal_preformence([['O', 'I-org', 'I-time', 'B-time']], [['O', 'O', 'O', 'O']])
+    # print(res)

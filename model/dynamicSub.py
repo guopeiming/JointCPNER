@@ -341,7 +341,7 @@ class EmbeddingLayer(nn.Module):
         if subword == 'max_pool':
             self.pool = nn.AdaptiveMaxPool1d(1)
         elif subword == 'avg_pool':
-            self.pool = nn.AdaptiveMaxPool1d(1)
+            self.pool = nn.AdaptiveAvgPool1d(1)
         else:
             self.pool = None
 
@@ -508,14 +508,15 @@ class EmbeddingLayer(nn.Module):
             snts_repr_list = [
                 torch.cat([
                     snt_repr.unsqueeze(0),
-                    torch.zeros((seq_len-snt_repr.shape[0], snt_repr.shape[1])).unsqueeze(0).to(self.device)], dim=1)
-                for snt_repr in snts_repr_list]
+                    torch.zeros((1, seq_len-snt_repr.shape[0], snt_repr.shape[1]), device=self.device)], dim=1)
+                for snt_repr in snts_repr_list
+            ]
             bert_embeddings = torch.cat(snts_repr_list, dim=0)  # [batch_size, seq_len, dim]
         elif self.subword == 'max_pool' or self.subword == 'avg_pool':
             bert_embeddings_list = []
             for i in range(batch_size):
-                startpoint = torch.nonzero(startpoint_idx[i]).squeeze(1)
-                endpoint = torch.nonzero(endpoint_idx[i]).squeeze(1)
+                startpoint = torch.nonzero(startpoint_idx[i], as_tuple=False).squeeze(1)
+                endpoint = torch.nonzero(endpoint_idx[i], as_tuple=False).squeeze(1)
                 words_length = torch.add(endpoint - startpoint, 1).tolist()
                 assert len(words_length) == len(snts[i])+2 or (len(words_length) == len(snts[i])+3)
                 # if do not drop the last word representation, we can not deal the situation
