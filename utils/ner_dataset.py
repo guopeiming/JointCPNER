@@ -1,9 +1,10 @@
 # @Author : guopeiming
 # @Contact : guopeiming.gpm@{qq, gmail}.com
 import os
+import json
 from torch.utils.data import Dataset, DataLoader
 from utils.vocab import Vocab
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Union, Set
 from config.Constants import LANGS_NEED_SEG, DATASET_LIST
 
 
@@ -135,7 +136,17 @@ def vocabs_init(train_data: List[str]) -> Vocab:
     return vocab
 
 
-def write_ners(path_pred: str, path_gold: str, insts: Dict[str, List[List[str]]]):
+def write_ners(
+    path_pred: str, path_gold: str,
+    insts: Dict[str, List[Union[List[str], Set[Tuple[str, Tuple[int, int]]]]]], span_based: bool
+):
+    if span_based:
+        write_ners_span_based(path_pred, path_gold, insts)
+    else:
+        write_ners_no_span_based(path_pred, path_gold, insts)
+
+
+def write_ners_no_span_based(path_pred: str, path_gold: str, insts: Dict[str, List[List[str]]]):
     snts, tags_pred, tags_gold = insts['snts'], insts['pred_tags'], insts['gold_tags']
     assert len(snts) == len(tags_pred) == len(tags_gold)
     with open(path_pred, 'w', encoding='utf-8') as writer_pred, open(path_gold, 'w', encoding='utf-8') as writer_gold:
@@ -146,3 +157,19 @@ def write_ners(path_pred: str, path_gold: str, insts: Dict[str, List[List[str]]]
                 writer_gold.write(word + '\t' + ner_gold + '\n')
             writer_pred.write('\n')
             writer_gold.write('\n')
+
+
+def write_ners_span_based(
+    path_pred: str, path_gold: str, insts: Dict[str, List[Set[Tuple[str, Tuple[int, int]]]]]
+):
+    snts, spans_pred, spans_gold = insts['snts'], insts['pred_tags'], insts['gold_tags']
+    assert len(snts) == len(spans_pred) == len(spans_gold)
+
+    with open(path_pred, 'w', encoding='utf-8') as writer_pred, open(path_gold, 'w', encoding='utf-8') as writer_gold:
+        for snt, span_pred, span_gold in zip(snts, spans_pred, spans_gold):
+            assert len(span_pred) == 0 or max(span_pred, key=lambda item: item[1][1])[1][1] <= len(snt)
+            assert len(span_gold) == 0 or max(span_gold, key=lambda item: item[1][1])[1][1] <= len(snt)
+
+            writer_gold.write(' '.join(snt)+'|||||'+json.dumps(list(span_gold))+'\n')
+
+            writer_pred.write(' '.join(snt)+'|||||'+json.dumps(list(span_pred))+'\n')

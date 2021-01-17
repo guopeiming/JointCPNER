@@ -199,12 +199,11 @@ class SpanNER(nn.Module):
 
         # during test, return tags list
         if not self.training:
-            label_score = nn.functional.softmax(label_score, dim=-1)
-            res_tags = []
+            res_spans = []
             for i in range(batch_size):
-                res_tag = self.generate_tags(label_score[i], snt_lens[i])
-                res_tags.append(res_tag)
-            return res_tags
+                res_span = self.generate_res_spans(label_score[i], snt_lens[i])
+                res_spans.append(res_span)
+            return res_spans
 
         # during train, return loss tensor
         gold_tags = insts['golds']
@@ -247,7 +246,7 @@ class SpanNER(nn.Module):
         for i in range(snt_len):
             for j in range(i, snt_len):
                 if label_list[i, j] != len(self.vocab):
-                    res_spans.add((self.vocab[label_list[i, j]], (i, j+1)))
+                    res_spans.add((self.vocab[label_list[i, j]].lower(), (i, j+1)))
         return res_spans
 
     def generate_tags(self, label_score: torch.Tensor, snt_len: int) -> List[str]:

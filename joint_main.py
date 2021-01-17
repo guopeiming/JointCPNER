@@ -16,7 +16,7 @@ from config.joint_args import parse_args
 from utils.visual_logger import VisualLogger
 from utils.trees import InternalTreebankNode
 from typing import Tuple, List, Set, Union, Dict
-from utils.jointencoder_dataset import load_data, batch_filter, batch_spliter, write_joint_data
+from utils.joint_dataset import load_data, batch_filter, batch_spliter, write_joint_data
 
 
 def preprocess() -> argparse.Namespace:

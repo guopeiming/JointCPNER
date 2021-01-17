@@ -84,11 +84,14 @@ def cal_performance_pos_par(
                 temp_set.add(span)
             else:
                 false_positive_ner += 1
-        false_negative_ner += len(gold_ner_spans)
+
+        for span in gold_ner_spans:
+            temp_set.add(span)
+            false_negative_ner += 1
 
         # NER return result
         res_pred_ner_spans.append(pred_ner_spans)
-        res_gold_ner_spans.append(gold_ner_spans.union(temp_set))
+        res_gold_ner_spans.append(temp_set)
 
         # pos metric
         assert len(pred_pos_tags) == len(gold_pos_tags)
@@ -191,11 +194,14 @@ def cal_performance_seg_pos_par(
                 temp_set.add(span)
             else:
                 false_positive_ner += 1
-        false_negative_ner += len(gold_ner_spans)
+
+        for span in gold_ner_spans:
+            temp_set.add(span)
+            false_negative_ner += 1
 
         # NER return result
         res_pred_ner_spans.append(pred_ner_spans)
-        res_gold_ner_spans.append(gold_ner_spans.union(temp_set))
+        res_gold_ner_spans.append(temp_set)
 
         # pos, seg metric
         gold_seg_spans = set()

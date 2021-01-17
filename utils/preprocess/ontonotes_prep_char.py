@@ -20,10 +20,10 @@ def generate_collection_chinese(tag="train"):
     """
     results = itertools.chain.from_iterable(
         glob.iglob(os.path.join(root, '*.v4_gold_conll'))
-        for root, dirs, files in os.walk('./data/conll-2012/v4/data/chinese/'+tag)
+        for root, dirs, files in os.walk('./data/conll-2012/v4/data/'+tag+'/data/'+'chinese/')
     )
 
-    with open('./data/onto/'+tag+".corpus", 'w', encoding='utf-8') as writer:
+    with open('./data/onto/chinese_origin/'+tag+".corpus", 'w', encoding='utf-8') as writer:
         for cur_file in results:
             with open(cur_file, 'r', encoding='utf-8') as reader:
                 print(cur_file)
@@ -66,11 +66,11 @@ def generate_collection_chinese(tag="train"):
                         if re.search(r'http|ｈｔｔｐ|.com|．ｃｏｍ|．|Ｂｌｏｇ|Ｍｏｖｅ|ｅ７ｂ１|＜|＞|ＯｔｒＰ|ＣＴＲＬ|\[|ｋｉｌｌ|Ｒａｉｓｅ|ｓｕｄｏ', word):
                             print(word, pos)
                             if pos == 'URL':
-                                word = 'http://'
+                                word = 'http'
                             elif re.search(r'Ｂｌｏｇ', word):
                                 word = 'Blog'
                             elif re.search(r'ｗｗｗ．', word):
-                                word = 'www.'
+                                word = 'www'
                             elif re.search(r'．．．', word):
                                 word = '....'
                             else:
@@ -122,33 +122,10 @@ def generate_onto_cropus():
     generate_collection_chinese("test")
 
 
-def convert_parsing_data_word(data: str):
+def convert_parsing_data(data: str):
     root_dir = './data/onto'
     dataset = data + '.corpus'
-    with open(os.path.join(root_dir, dataset), 'r', encoding='utf-8') as reader, \
-         open(os.path.join(root_dir, 'parsing_word', dataset), 'w', encoding='utf-8') as writer:
-        for line in reader:
-            line = line.strip()
-            if len(line) == 0:
-                writer.write('\n')
-                continue
-            items = line.split('\t')
-            assert len(items) == 4
-            word, pos, cons = items[0], items[1], items[2]
-            assert '*' in cons
-            writer.write(cons.replace('*', '(%s %s)' % (pos, word)))
-
-
-def convert_parsing_dataset_word():
-    convert_parsing_data_word('train')
-    convert_parsing_data_word('dev')
-    convert_parsing_data_word('test')
-
-
-def convert_parsing_data_char(data: str):
-    root_dir = './data/onto'
-    dataset = data + '.corpus'
-    with open(os.path.join(root_dir, dataset), 'r', encoding='utf-8') as reader, \
+    with open(os.path.join(root_dir, 'chinese_origin', dataset), 'r', encoding='utf-8') as reader, \
          open(os.path.join(root_dir, 'parsing_char', dataset), 'w', encoding='utf-8') as writer:
         for line in reader:
             line = line.strip()
@@ -166,16 +143,16 @@ def convert_parsing_data_char(data: str):
             writer.write(cons.replace('*', '(%s %s)' % ('POSTAG-'+pos, text)))
 
 
-def convert_parsing_dataset_char():
-    convert_parsing_data_char('train')
-    convert_parsing_data_char('dev')
-    convert_parsing_data_char('test')
+def convert_parsing_dataset():
+    convert_parsing_data('train')
+    convert_parsing_data('dev')
+    convert_parsing_data('test')
 
 
-def convert_ner_data_char(data: str):
+def convert_ner_data(data: str):
     root_dir = './data/onto'
     dataset = data + '.corpus'
-    with open(os.path.join(root_dir, dataset), 'r', encoding='utf-8') as reader, \
+    with open(os.path.join(root_dir, 'chinese_origin', dataset), 'r', encoding='utf-8') as reader, \
          open(os.path.join(root_dir, 'ner_char', dataset), 'w', encoding='utf-8') as writer:
         for line in reader:
             line = line.strip()
@@ -197,19 +174,21 @@ def convert_ner_data_char(data: str):
                 exit(-1)
 
 
-def convert_ner_dataset_char():
-    convert_ner_data_char('train')
-    convert_ner_data_char('dev')
-    convert_ner_data_char('test')
+def convert_ner_dataset():
+    convert_ner_data('train')
+    convert_ner_data('dev')
+    convert_ner_data('test')
 
 
-def match_ner_cp():
+def modify_ner_data(data: str):
+    root_dir = './data/onto'
+    dataset = data + '.corpus'
     match_counter, conti_counter, not_match_counter = Counter(), Counter(), Counter()
     match, conti_match, not_match = 0, 0, 0
-    trees = load_trees('./data/onto/parsing_char/test.corpus')
-    ner_snts, ner_golds = load_data_from_file('./data/onto/ner_char/test.corpus')
+    trees = load_trees(os.path.join(root_dir, 'parsing_char', dataset))
+    ner_snts, ner_golds = load_data_from_file(os.path.join(root_dir, 'ner_char', dataset))
     assert len(trees) == len(ner_snts)
-    with open('./not_mach.txt', 'w', encoding='utf-8') as writer:  # , open('./data/onto/temp/train.corpus', 'w', encoding='utf-8') as ner_writer:
+    with open(os.path.join(root_dir, 'ner_char', dataset), 'w', encoding='utf-8') as ner_writer:
         for snt, ner_gold, tree in zip(ner_snts, ner_golds, trees):
             snt, ner_gold = snt.split(), ner_gold.split()
             assert len(list(tree.leaves())) == len(snt)
@@ -220,12 +199,11 @@ def match_ner_cp():
                     not_match += 1
 
                     # ======================================
-                    # for i in range(span[1][0], span[1][1]):
-                    #     ner_gold[i] = 'O'
+                    for i in range(span[1][0], span[1][1]):
+                        ner_gold[i] = 'O'
                     # ======================================
 
                     not_match_counter.update([span[0]])
-                    writer.write('\t'.join([span[0], ''.join(snt[span[1][0]:span[1][1]]), tree.linearize().replace('(', '[').replace(')', ']')+'\n']))
                 elif match_type == 1:
                     match_counter.update([span[0]])
                     match += 1
@@ -237,10 +215,10 @@ def match_ner_cp():
                     exit(-1)
 
             # ======================================
-            # assert len(snt) == len(ner_gold)
-            # for char, ner in zip(snt, ner_gold):
-            #     ner_writer.write(char+'\t'+ner+'\n')
-            # ner_writer.write('\n')
+            assert len(snt) == len(ner_gold)
+            for char, ner in zip(snt, ner_gold):
+                ner_writer.write(char+'\t'+ner+'\n')
+            ner_writer.write('\n')
             # ======================================
 
     print(match, conti_match, not_match, not_match/(not_match+match+conti_match))
@@ -249,14 +227,20 @@ def match_ner_cp():
     print(not_match_counter)
 
 
-def convert_joint_data_char(data: str, up: bool):
+def modify_ner_dataset():
+    modify_ner_data('train')
+    modify_ner_data('dev')
+    modify_ner_data('test')
+
+
+def convert_joint_data(data: str, up: bool):
     root_dir = './data/onto'
     dataset = data + '.corpus'
     trees = load_trees(os.path.join(root_dir, 'parsing_char', dataset))
     ner_snts, ner_golds = load_data_from_file(os.path.join(root_dir, 'ner_char', dataset))
     match, conti_match, not_match = 0, 0, 0
 
-    with open(os.path.join(root_dir, 'temp', dataset), 'w', encoding='utf-8') as writer:
+    with open(os.path.join(root_dir, 'joint_char', dataset), 'w', encoding='utf-8') as writer:
         assert len(trees) == len(ner_snts)
         for snt, ner_gold, tree in zip(ner_snts, ner_golds, trees):
             snt, ner_gold = snt.split(), ner_gold.split()
@@ -279,16 +263,15 @@ def convert_joint_data_char(data: str, up: bool):
     print(match, conti_match, not_match, not_match/(not_match+match+conti_match))
 
 
-def convert_joint_dataset_char():
-    convert_joint_data_char('train', False)
-    convert_joint_data_char('dev', False)
-    convert_joint_data_char('test', False)
+def convert_joint_dataset():
+    convert_joint_data('train', False)
+    convert_joint_data('dev', False)
+    convert_joint_data('test', False)
 
 
 if __name__ == '__main__':
     # generate_onto_cropus()
-    # convert_parsing_dataset_word()
-    # convert_ner_dataset_char()
-    # convert_parsing_dataset_char()
-    match_ner_cp()
-    # convert_joint_dataset_char()
+    # convert_ner_dataset()
+    # convert_parsing_dataset()
+    # modify_ner_dataset()
+    convert_joint_dataset()

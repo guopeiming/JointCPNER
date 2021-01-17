@@ -41,3 +41,4 @@ EMPTY_LABEL = ()
 PAD_STATEGY = 'longest'
 TRUNCATION_STATEGY = 'longest_first'
 CHARACTER_BASED = 'character_based'
+SPAN_BASED_NER = 'SpanNER'

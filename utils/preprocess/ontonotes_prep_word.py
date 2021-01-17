@@ -8,7 +8,7 @@ from utils.ner_dataset import load_data_from_file
 from utils.ner_evaluate import _bio_tag_to_spans
 
 
-def generate_collection_english(tag="train"):
+def generate_collection_chinese(tag="train"):
     """generate corpus including ner and constituency parsing.
 
     notes:
@@ -20,10 +20,10 @@ def generate_collection_english(tag="train"):
     """
     results = itertools.chain.from_iterable(
         glob.iglob(os.path.join(root, '*.v4_gold_conll'))
-        for root, dirs, files in os.walk('./data/conll-2012/v4/data/'+tag+'/data/'+'english/')
+        for root, dirs, files in os.walk('./data/conll-2012/v4/data/'+tag+'/data/'+'chinese/')
     )
 
-    with open('./data/onto/english_origin/'+tag+".corpus", 'w', encoding='utf-8') as writer:
+    with open('./data/onto/chinese_origin/'+tag+".corpus", 'w', encoding='utf-8') as writer:
         for cur_file in results:
             with open(cur_file, 'r', encoding='utf-8') as reader:
                 # print(cur_file)
@@ -62,15 +62,23 @@ def generate_collection_english(tag="train"):
                         print('error!!!')
                         exit(-1)
 
-                    if len(word) > 20:
-                        if re.match(r'http|<http', word):
-                            word = 'http'
-                        elif re.match(r'www', word):
-                            word = 'www'
-                        elif re.match(r'-----|\.\.\.\.\.|=====|_____', word):
-                            word = word[:5]
+                    if len(word) > 15:
+                        if re.search(r'http|ｈｔｔｐ|.com|．ｃｏｍ|．|Ｂｌｏｇ|Ｍｏｖｅ|ｅ７ｂ１|＜|＞|ＯｔｒＰ|ＣＴＲＬ|\[|ｋｉｌｌ|Ｒａｉｓｅ|ｓｕｄｏ', word):
+                            print(word, pos)
+                            if pos == 'URL':
+                                word = 'http'
+                            elif re.search(r'Ｂｌｏｇ', word):
+                                word = 'Blog'
+                            elif re.search(r'ｗｗｗ．', word):
+                                word = 'www'
+                            elif re.search(r'．．．', word):
+                                word = '....'
+                            else:
+                                word = word[:5]
+                        elif word.startswith('唐'):
+                            word = re.sub(r'\{.*\}', '', word)
                         else:
-                            print(word, cur_file)
+                            word = word
                     writer.write("\t".join([word, pos, cons, ner]) + '\n')
 
     # for cur_file in results:
@@ -90,11 +98,11 @@ def generate_collection_english(tag="train"):
     #             if len(word) > 15:
     #                 if re.search(r'http|ｈｔｔｐ|.com|．ｃｏｍ|．|Ｂｌｏｇ|Ｍｏｖｅ|ｅ７ｂ１|＜|＞|ＯｔｒＰ|ＣＴＲＬ|\[|ｋｉｌｌ|Ｒａｉｓｅ|ｓｕｄｏ', word):
     #                     if pos == 'URL':
-    #                         word = 'http://'
+    #                         word = 'http'
     #                     elif re.search(r'Ｂｌｏｇ', word):
     #                         word = 'Blog'
     #                     elif re.search(r'ｗｗｗ．', word):
-    #                         word = 'www.'
+    #                         word = 'www'
     #                     elif re.search(r'．．．', word):
     #                         word = '....'
     #                     else:
@@ -106,20 +114,19 @@ def generate_collection_english(tag="train"):
     #                     print(word)
     #                 else:
     #                     word = word
-    #                 print(word, ori_ner, cur_file)
 
 
 def generate_onto_cropus():
-    generate_collection_english("train")
-    generate_collection_english("dev")
-    generate_collection_english("test")
+    generate_collection_chinese("train")
+    generate_collection_chinese("dev")
+    generate_collection_chinese("test")
 
 
 def convert_parsing_data(data: str):
     root_dir = './data/onto'
     dataset = data + '.corpus'
-    with open(os.path.join(root_dir, 'english_origin', dataset), 'r', encoding='utf-8') as reader, \
-         open(os.path.join(root_dir, 'parsing_en', dataset), 'w', encoding='utf-8') as writer:
+    with open(os.path.join(root_dir, 'chinese_origin', dataset), 'r', encoding='utf-8') as reader, \
+         open(os.path.join(root_dir, 'parsing_word', dataset), 'w', encoding='utf-8') as writer:
         for line in reader:
             line = line.strip()
             if len(line) == 0:
@@ -141,8 +148,8 @@ def convert_parsing_dataset():
 def convert_parsing_data_pos(data: str):
     root_dir = './data/onto'
     dataset = data + '.corpus'
-    with open(os.path.join(root_dir, 'english_origin', dataset), 'r', encoding='utf-8') as reader, \
-         open(os.path.join(root_dir, 'parsing_en_pos', dataset), 'w', encoding='utf-8') as writer:
+    with open(os.path.join(root_dir, 'chinese_origin', dataset), 'r', encoding='utf-8') as reader, \
+         open(os.path.join(root_dir, 'parsing_word_pos', dataset), 'w', encoding='utf-8') as writer:
         for line in reader:
             line = line.strip()
             if len(line) == 0:
@@ -164,8 +171,8 @@ def convert_parsing_dataset_pos():
 def convert_ner_data(data: str):
     root_dir = './data/onto'
     dataset = data + '.corpus'
-    with open(os.path.join(root_dir, 'english_origin', dataset), 'r', encoding='utf-8') as reader, \
-         open(os.path.join(root_dir, 'ner_en', dataset), 'w', encoding='utf-8') as writer:
+    with open(os.path.join(root_dir, 'chinese_origin', dataset), 'r', encoding='utf-8') as reader, \
+         open(os.path.join(root_dir, 'ner_word', dataset), 'w', encoding='utf-8') as writer:
         for line in reader:
             line = line.strip()
             if len(line) == 0:
@@ -188,10 +195,10 @@ def modify_ner_data(data: str):
     dataset = data + '.corpus'
     match_counter, conti_counter, not_match_counter = Counter(), Counter(), Counter()
     match, conti_match, not_match = 0, 0, 0
-    trees = load_trees(os.path.join(root_dir, 'parsing_en_pos', dataset))
-    ner_snts, ner_golds = load_data_from_file(os.path.join(root_dir, 'ner_en', dataset))
+    trees = load_trees(os.path.join(root_dir, 'parsing_word_pos', dataset))
+    ner_snts, ner_golds = load_data_from_file(os.path.join(root_dir, 'ner_word', dataset))
     assert len(trees) == len(ner_snts)
-    with open(os.path.join(root_dir, 'ner_en', dataset), 'w', encoding='utf-8') as ner_writer:
+    with open(os.path.join(root_dir, 'ner_word', dataset), 'w', encoding='utf-8') as ner_writer:
         for snt, ner_gold, tree in zip(ner_snts, ner_golds, trees):
             snt, ner_gold = snt.split(), ner_gold.split()
             assert len(list(tree.leaves())) == len(snt)
@@ -239,11 +246,11 @@ def modify_ner_dataset():
 def convert_joint_data(data: str, up: bool):
     root_dir = './data/onto'
     dataset = data + '.corpus'
-    trees = load_trees(os.path.join(root_dir, 'parsing_en_pos', dataset))
-    ner_snts, ner_golds = load_data_from_file(os.path.join(root_dir, 'ner_en', dataset))
+    trees = load_trees(os.path.join(root_dir, 'parsing_word_pos', dataset))
+    ner_snts, ner_golds = load_data_from_file(os.path.join(root_dir, 'ner_word', dataset))
     match, conti_match, not_match = 0, 0, 0
 
-    with open(os.path.join(root_dir, 'joint_en_pos', dataset), 'w', encoding='utf-8') as writer:
+    with open(os.path.join(root_dir, 'joint_word_pos', dataset), 'w', encoding='utf-8') as writer:
         assert len(trees) == len(ner_snts)
         for snt, ner_gold, tree in zip(ner_snts, ner_golds, trees):
             snt, ner_gold = snt.split(), ner_gold.split()

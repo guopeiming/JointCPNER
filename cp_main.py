@@ -16,7 +16,7 @@ from model.CPModel import CPModel
 from torch.utils.data import DataLoader
 from utils.visual_logger import VisualLogger
 from utils.trees import write_trees, InternalTreebankNode
-from utils.joint_dataset import load_data, batch_filter, batch_spliter
+from utils.cp_dataset import load_data, batch_filter, batch_spliter
 
 
 def preprocess() -> argparse.Namespace:
@@ -63,6 +63,7 @@ def postprocess(args: argparse.Namespace, start: float):
 def eval_model(model: torch.nn.Module, dataset: DataLoader, language: str, subword: str, DATASET_MAX_SNT_LENGTH: int,
                BATCH_MAX_SNT_LENGTH: int, evalb_path: str, type_: str)\
         -> Tuple[cp_evaluate.JointFScore, List[InternalTreebankNode], List[InternalTreebankNode]]:
+    torch.cuda.empty_cache()
     trees_pred, trees_gold = [], []
     for insts in dataset:
         model.eval()

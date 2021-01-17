@@ -27,9 +27,11 @@ class CPModel(nn.Module):
             vocabs, subword, use_pos_tag, bert_path, transliterate, d_model, partition, pos_tag_emb_dropout,
             position_emb_dropout, bert_emb_dropout, emb_dropout, language, device
         )
+
         self.encoder = Encoder(
             d_model, partition, layer_num, hidden_dropout, attention_dropout, dim_ff, nhead, kqv_dim, device
         )
+
         self.label_classifier = nn.Sequential(
             nn.Linear(d_model, label_hidden),
             nn.LayerNorm(label_hidden),

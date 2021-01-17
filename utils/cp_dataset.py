@@ -9,25 +9,19 @@ from utils.trees import InternalParseNode, InternalTreebankNode, load_trees, wri
 from config.Constants import LANGS_NEED_SEG, DATASET_LIST, NER_LABELS, START, STOP, TAG_UNK, EMPTY_LABEL
 
 
-class JointDataset(Dataset):
-    def __init__(self, joint_data: List[InternalParseNode], parsing_data: List[InternalParseNode]):
-        super(JointDataset, self).__init__()
-        self.joint_trees = joint_data
-        self.parsing_trees = parsing_data
-        assert len(self.joint_trees) == len(self.parsing_trees)
+class CPDataset(Dataset):
+    def __init__(self, data: List[InternalParseNode]):
+        super(CPDataset, self).__init__()
+        self.parse_trees = data
 
     def __len__(self):
-        return len(self.joint_trees)
+        return len(self.parse_trees)
 
     def __getitem__(self, idx):
-        leaves = list(self.joint_trees[idx].leaves())
-        assert len(leaves) == len(list(self.parsing_trees[idx].leaves()))
+        leaves = list(self.parse_trees[idx].leaves())
         pos_tags = [leaf.tag for leaf in leaves]
         words = [leaf.word for leaf in leaves]
-        return {
-            'pos_tags': pos_tags, 'words': words, 'joint_gold_tree': self.joint_trees[idx],
-            'parsing_gold_tree': self.parsing_trees[idx]
-        }
+        return {'pos_tags': pos_tags, 'words': words, 'gold_tree': self.parse_trees[idx]}
 
 
 def aggregate_collate_fn(insts) -> Dict[str, List[Union[List[str], InternalParseNode]]]:
@@ -37,29 +31,24 @@ def aggregate_collate_fn(insts) -> Dict[str, List[Union[List[str], InternalParse
     Returns:
 
     """
-    pos_tags, snts, joint_gold_trees, parsing_gold_trees = [], [], [], []
+    pos_tags, snts, gold_trees = [], [], []
     for inst in insts:
         pos_tags.append(inst['pos_tags'])
         snts.append(inst['words'])
-        joint_gold_trees.append(inst['joint_gold_tree'])
-        parsing_gold_trees.append(inst['parsing_gold_tree'])
-    assert len(pos_tags) == len(snts) == len(joint_gold_trees) == len(parsing_gold_trees)
+        gold_trees.append(inst['gold_tree'])
+    assert len(pos_tags) == len(snts) == len(gold_trees)
     for pos_tag, snt in zip(pos_tags, snts):
         assert len(pos_tag) == len(snt)
-    return {
-        'pos_tags': pos_tags, 'snts': snts, 'joint_gold_trees': joint_gold_trees,
-        'parsing_gold_trees': parsing_gold_trees
-    }
+    return {'pos_tags': pos_tags, 'snts': snts, 'gold_trees': gold_trees}
 
 
 def batch_filter(insts: Dict[str, List[Union[List[str], InternalParseNode]]], language: str,
                  DATASET_MAX_SNT_LENGTH: int) -> Tuple[Dict[str, List[Union[List[str], InternalParseNode]]], int, int]:
-    pos_tags, snts, joint_gold_trees, parsing_gold_trees = \
-        insts['pos_tags'], insts['snts'], insts['joint_gold_trees'], insts['parsing_gold_trees']
-    res_pos_tags, res_snts, res_joint_gold_trees, res_parsing_gold_trees = [], [], [], []
+    pos_tags, snts, gold_trees = insts['pos_tags'], insts['snts'], insts['gold_trees']
+    res_pos_tags, res_snts, res_gold_trees = [], [], []
     max_len = 0
-    assert len(pos_tags) == len(snts) == len(joint_gold_trees) == len(parsing_gold_trees)
-    for pos_tag, snt, joint_gold_tree, parsing_gold_tree in zip(pos_tags, snts, joint_gold_trees, parsing_gold_trees):
+    assert len(pos_tags) == len(snts) == len(gold_trees)
+    for pos_tag, snt, gold_tree in zip(pos_tags, snts, gold_trees):
         if language in LANGS_NEED_SEG:
             snt_len = sum([len(word) for word in snt])
         else:
@@ -67,23 +56,12 @@ def batch_filter(insts: Dict[str, List[Union[List[str], InternalParseNode]]], la
         if snt_len <= DATASET_MAX_SNT_LENGTH:
             res_pos_tags.append(pos_tag)
             res_snts.append(snt)
-            res_joint_gold_trees.append(joint_gold_tree)
-            res_parsing_gold_trees.append(parsing_gold_tree)
+            res_gold_trees.append(gold_tree)
             if max_len < snt_len:
                 max_len = snt_len
     if len(res_snts) == 0:
-        res_pos_tags, res_snts, res_joint_gold_trees, res_parsing_gold_trees =\
-            pos_tags[0], snts[0], joint_gold_trees[0], parsing_gold_trees[0]
-    return (
-        {
-            'pos_tags': res_pos_tags,
-            'snts': res_snts,
-            'joint_gold_trees': res_joint_gold_trees,
-            'parsing_gold_trees': res_parsing_gold_trees
-        },
-        len(res_snts),
-        max_len
-    )
+        res_pos_tags, res_snts, res_gold_trees = pos_tags[0], snts[0], gold_trees[0]
+    return {'pos_tags': res_pos_tags, 'snts': res_snts, 'gold_trees': res_gold_trees}, len(res_snts), max_len
 
 
 def batch_spliter(insts: Dict[str, List[Union[List[str], InternalParseNode]]], max_len: int, BATCH_MAX_SNT_LENGTH: int)\
@@ -95,8 +73,8 @@ def batch_spliter(insts: Dict[str, List[Union[List[str], InternalParseNode]]], m
     return res
 
 
-def load_data(path: str, parsing_path: str, batch_size: int, accum_steps: int, shuffle: bool, num_workers: int,
-              drop_last: bool) -> Tuple[DataLoader, DataLoader, DataLoader, Dict[str, Vocabulary]]:
+def load_data(path: str, batch_size: int, accum_steps: int, shuffle: bool, num_workers: int, drop_last: bool)\
+        -> Tuple[DataLoader, DataLoader, DataLoader, Dict[str, Vocabulary]]:
     """load the datasets.
     Args:
         path: path of input data.
@@ -110,28 +88,25 @@ def load_data(path: str, parsing_path: str, batch_size: int, accum_steps: int, s
     """
     print('data loading starts...', flush=True)
     res = tuple()
-    joint_vocabs, parsing_vocabs = None, None
+    vocabs = None
     assert DATASET_LIST[0] == 'train'
     for item in DATASET_LIST:
-        joint_treebank = load_trees(os.path.join(path, item+'.corpus'), strip_top=True)
-        parsing_treebank = load_trees(os.path.join(parsing_path, item+'.corpus'), strip_top=True)
-        joint_parse_trees = [tree.convert() for tree in joint_treebank]
-        parsing_parse_trees = [tree.convert() for tree in parsing_treebank]
-        print('len(%s_data): %d' % (item, len(joint_parse_trees)))
+        treebank = load_trees(os.path.join(path, item+'.corpus'), strip_top=True)
+        parse_trees = [tree.convert() for tree in treebank]
+        print('len(%s_data): %d' % (item, len(parse_trees)))
 
         if item == DATASET_LIST[0]:
-            joint_vocabs = vocabs_init(joint_parse_trees)
-            parsing_vocabs = vocabs_init(parsing_parse_trees)
+            vocabs = vocabs_init(parse_trees)
 
         data_loader = DataLoader(
-                        JointDataset(joint_parse_trees, parsing_parse_trees),
-                        batch_size=batch_size if item == DATASET_LIST[0] else batch_size*2,
+                        CPDataset(parse_trees),
+                        batch_size=batch_size if item == DATASET_LIST[0] else batch_size*accum_steps,
                         shuffle=shuffle,
                         num_workers=num_workers,
                         collate_fn=aggregate_collate_fn,
                         drop_last=drop_last)
         res = res + (data_loader, )
-    return res + (joint_vocabs, parsing_vocabs)
+    return res + (vocabs, )
 
 
 def vocabs_init(train_data: List[InternalParseNode]) -> Dict[str, Vocabulary]:

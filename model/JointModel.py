@@ -18,7 +18,6 @@ from model.partition_transformer import PartitionTransformer
 
 class JointModel(nn.Module):
     def __init__(self, joint_vocabs: Dict[str, Vocabulary], parsing_vocabs: Dict[str, Vocabulary],
-                 #  cross_labels_idx: Dict[str, Tuple[int]],
                  subword: str, use_pos_tag: bool, bert_path: str,
                  transliterate: str, d_model: int, partition: bool, pos_tag_emb_dropout: float,
                  position_emb_dropout: float, bert_emb_dropout: float, emb_dropout: float, layer_num: int,
@@ -30,9 +29,11 @@ class JointModel(nn.Module):
             joint_vocabs, subword, use_pos_tag, bert_path, transliterate, d_model, partition, pos_tag_emb_dropout,
             position_emb_dropout, bert_emb_dropout, emb_dropout, language, device
         )
+
         self.encoder = Encoder(
             d_model, partition, layer_num, hidden_dropout, attention_dropout, dim_ff, nhead, kqv_dim, device
         )
+
         self.joint_label_classifier = nn.Sequential(
             nn.Linear(d_model, label_hidden),
             nn.LayerNorm(label_hidden),

@@ -1,6 +1,6 @@
 # @Author : guopeiming
 # @Contact : guopeiming.gpm@{qq, gmail}.com
-from typing import List, Set, Tuple
+from typing import List, Set, Tuple, Union
 
 
 class NERFScore(object):
@@ -57,7 +57,49 @@ def _bio_tag_to_spans(tags: List[str], ignore_labels=None) -> Set[Tuple[str, Tup
     return {(span[0], (span[1][0], span[1][1] + 1)) for span in spans if span[0] not in ignore_labels}
 
 
-def cal_performance(tags_pred: List[List[str]], tags_gold: List[List[str]], ignore_labels=None) -> NERFScore:
+def cal_performance(
+    span_based: bool, tags_pred: List[Union[List[str], Set[Tuple[str, Tuple[int, int]]]]], tags_gold: List[List[str]]
+) -> NERFScore:
+    if span_based:
+        return cal_performance_span_based(tags_pred, tags_gold)
+    else:
+        return cal_performance_no_span_based(tags_pred, tags_gold)
+
+
+def cal_performance_span_based(
+    spans_pred: List[Set[Tuple[str, Tuple[int, int]]]], tags_gold: List[List[str]], ignore_labels=None
+) -> NERFScore:
+
+    res_spans_gold = []
+    assert len(spans_pred) == len(tags_gold)
+
+    true_positive, false_positive, false_negative = 0, 0, 0
+    for span_pred, tag_gold in zip(spans_pred, tags_gold):
+        assert len(span_pred) == 0 or max(span_pred, key=lambda item: item[1][1])[1][1] <= len(tag_gold)
+        span_gold = _bio_tag_to_spans(tag_gold, ignore_labels)
+
+        temp_set = set()
+        for span in span_gold:
+            temp_set.add(span)
+        res_spans_gold.append(temp_set)
+
+        for span in span_pred:
+            if span in span_gold:
+                true_positive += 1
+                span_gold.remove(span)
+            else:
+                false_positive += 1
+
+        false_negative += len(span_gold)
+
+    assert len(res_spans_gold) == len(spans_pred) == len(tags_gold)
+
+    return NERFScore(true_positive, false_positive, false_negative), res_spans_gold
+
+
+def cal_performance_no_span_based(
+    tags_pred: List[List[str]], tags_gold: List[List[str]], ignore_labels=None
+) -> NERFScore:
     """计算基于span的F1、P、R.
     Args:
         tags_pred: 裁剪后的label
@@ -82,6 +124,7 @@ def cal_performance(tags_pred: List[List[str]], tags_gold: List[List[str]], igno
                 false_positive += 1
 
         false_negative += len(spans_gold)
+
     return NERFScore(true_positive, false_positive, false_negative)
 
 
@@ -110,7 +153,7 @@ if __name__ == '__main__':
                 word, ner = line.split('\t')
                 pred.append(ner)
 
-    res = cal_preformence(preds, golds)
+    res = cal_performance(preds, golds)
     print(res)
     # res = cal_preformence([['O', 'I-org', 'I-time', 'B-time']], [['O', 'O', 'O', 'O']])
     # print(res)

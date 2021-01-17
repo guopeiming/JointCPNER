@@ -1,5 +1,6 @@
 # @Author : guopeiming
 # @Contact : guopeiming.gpm@{qq, gmail}.com
+from config.Constants import SPAN_BASED_NER
 import os
 import time
 import torch
@@ -11,7 +12,7 @@ import numpy as np
 from utils.optim import Optim
 from utils import ner_evaluate
 from model.NERModel import BertCRFNER, BertEncoderNER, BertNER, SpanNER
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Set, Union
 from config.ner_args import parse_args
 from torch.utils.data import DataLoader
 from utils.visual_logger import VisualLogger
@@ -61,9 +62,10 @@ def postprocess(args: argparse.Namespace, start: float):
 
 
 @torch.no_grad()
-def eval_model(model: torch.nn.Module, dataset: DataLoader, language: str, DATASET_MAX_SNT_LENGTH: int,
-               BATCH_MAX_SNT_LENGTH: int, type_: str)\
-        -> Tuple[ner_evaluate.NERFScore, Dict[str, List[List[str]]]]:
+def eval_model(
+    model: torch.nn.Module, dataset: DataLoader, span_based: bool, language: str, DATASET_MAX_SNT_LENGTH: int,
+    BATCH_MAX_SNT_LENGTH: int, type_: str
+) -> Tuple[ner_evaluate.NERFScore, Dict[str, List[Union[List[str], Set[Tuple[str, Tuple[int, int]]]]]]]:
     tags_pred, tags_gold, snts = [], [], []
     for insts in dataset:
         model.eval()
@@ -77,7 +79,10 @@ def eval_model(model: torch.nn.Module, dataset: DataLoader, language: str, DATAS
             tags_gold.extend(tags_batch_gold)
 
     assert len(tags_pred) == len(tags_gold)
-    fscore = ner_evaluate.cal_performance(tags_pred, tags_gold)
+    if span_based:
+        fscore, tags_gold = ner_evaluate.cal_performance(span_based, tags_pred, tags_gold)
+    else:
+        fscore = ner_evaluate.cal_performance(span_based, tags_pred, tags_gold)
     print('Model performance in %s dataset: metric: %s' % (type_, fscore))
     torch.cuda.empty_cache()
     return fscore, {'snts': snts, 'pred_tags': tags_pred, 'gold_tags': tags_gold}
@@ -211,10 +216,12 @@ def main():
             if steps % (args.accum_steps * args.eval_interval) == 0:
                 print('model evaluating starts...')
                 fscore_dev, pred_dev = eval_model(
-                    model, dev_data, args.language, args.DATASET_MAX_SNT_LENGTH, args.BATCH_MAX_SNT_LENGTH, 'dev'
+                    model, dev_data, args.name == SPAN_BASED_NER, args.language, args.DATASET_MAX_SNT_LENGTH,
+                    args.BATCH_MAX_SNT_LENGTH, 'dev'
                 )
                 fscore_test, pred_test = eval_model(
-                    model, test_data, args.language, args.DATASET_MAX_SNT_LENGTH, args.BATCH_MAX_SNT_LENGTH, 'test'
+                    model, test_data, args.name == SPAN_BASED_NER, args.language, args.DATASET_MAX_SNT_LENGTH,
+                    args.BATCH_MAX_SNT_LENGTH, 'test'
                 )
                 visual_dic = {'F/dev': fscore_dev.fscore, 'F/test': fscore_test.fscore}
                 args.visual_logger.visual_scalars(visual_dic, steps // args.accum_steps)
@@ -224,10 +231,10 @@ def main():
                     patience = args.patience
                     write_ners(
                         os.path.join(args.save_path, 'dev.pred.best.ners'),
-                        os.path.join(args.save_path, 'dev.gold.ners'), pred_dev)
+                        os.path.join(args.save_path, 'dev.gold.ners'), pred_dev, args.name == SPAN_BASED_NER)
                     write_ners(
                         os.path.join(args.save_path, 'test.pred.best.ners'),
-                        os.path.join(args.save_path, 'test.gold.ners'), pred_test)
+                        os.path.join(args.save_path, 'test.gold.ners'), pred_test, args.name == SPAN_BASED_NER)
                     if args.save:
                         torch.save(model.pack_state_dict(), os.path.join(args.save_path, args.name+'.best.model.pt'))
                 print('best performance:\ndev: %s\ntest: %s' % (best_dev, best_test))

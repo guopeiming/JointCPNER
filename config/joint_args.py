@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     # [Optimizer]
     parser.add_argument('--optim', default='Adam', type=str, help='optimizer used')
     parser.add_argument('--lr', default=0.001, type=float, help='learning rate')
-    parser.add_argument('--lr_fine_tune', default=0.00001, type=float, help='fine tune learning rate')
+    parser.add_argument('--lr_fine_tune', default=0.00002, type=float, help='fine tune learning rate')
     parser.add_argument('--weight_decay', default=1e-2, type=float, help='lambda')
     parser.add_argument('--clip_grad', default=False, type=bool, help='whether to ues util.clip')
     parser.add_argument('--clip_grad_max_norm', default=4.0, type=float, help='clip_grad_max_norm')
@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
 
     # [Model]
     parser.add_argument('--name', default='JointModel', type=str, help='name of model')
-    parser.add_argument('--subword', default='max_pool', type=str, choices=['character_based', 'endpoint', 'startpoint', 'max_pool', 'avg_pool'], help='the method to represent word from BERT subword')
+    parser.add_argument('--subword', default='avg_pool', type=str, choices=['character_based', 'endpoint', 'startpoint', 'max_pool', 'avg_pool'], help='the method to represent word from BERT subword')
     # if language is chinese, when character-based, use_pos_tag should be False.
     parser.add_argument('--use_pos_tag', default=False, type=bool, help='whether to use pos_tag')
     # [Model-Embedding]
