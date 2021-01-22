@@ -83,12 +83,13 @@ class JointModel(nn.Module):
 
         joint_labels_score = self.joint_classifier(joint_repr)
         parsing_labels_score = self.parsing_classifier(parsing_repr)
-        ner_labels_score = self.ner_classifier(ner_repr[:, :-1, :-1, :])
-        # ner_labels_score = self.ner_classifier(ner_repr[:, :-1, 1:, :])
+        # ner_labels_score = self.ner_classifier(ner_repr[:, :-1, :-1, :])
+        ner_labels_score = self.ner_classifier(ner_repr[:, :-1, 1:, :])
 
         empty_label_score = torch.zeros((batch_size, seq_len+1, seq_len+1, 1), device=self.device)
         joint_charts = torch.cat([empty_label_score, joint_labels_score], dim=3)
         parsing_charts = torch.cat([empty_label_score, parsing_labels_score], dim=3)
+        ner_labels_score = torch.cat([ner_labels_score, empty_label_score[:, :-1, :-1, :]], dim=3)
         joint_charts_np = joint_charts.cpu().detach().numpy()
         parsing_charts_np = parsing_charts.cpu().detach().numpy()
 
@@ -129,7 +130,7 @@ class JointModel(nn.Module):
         p_is, p_js, g_is, g_js, p_labels, g_labels, batch_ids, paugment_total_joint = [], [], [], [], [], [], [], 0.0
         p_is_parsing, p_js_parsing, g_is_parsing, g_js_parsing, p_labels_parsing, g_labels_parsing, batch_ids_parsing,\
             paugment_total_parsing = [], [], [], [], [], [], [], 0.0
-        ner_is, ner_js, ner_labels, ner_batch_ids = [], [], [], []
+        # ner_is, ner_js, ner_labels, ner_batch_ids = [], [], [], []
         for i, snt_len in enumerate(snts_len):
 
             # joint parser
@@ -159,11 +160,12 @@ class JointModel(nn.Module):
             batch_ids_parsing.extend([i for _ in range(len(p_i))])
 
             # ner idx
-            ner_i, ner_j, ner_label = self.generate_ner_spans(joint_golds[i])
-            ner_is.extend(ner_i)
-            ner_js.extend([j-1 for j in ner_j])
-            ner_labels.extend(ner_label)
-            ner_batch_ids.extend([i for _ in range(len(ner_i))])
+            # ner_i, ner_j, ner_label = self.generate_ner_spans(joint_golds[i])
+            # ner_is.extend(ner_i)
+            # ner_js.extend([j-1 for j in ner_j])
+            # # ner_js.extend([j for j in ner_j])
+            # ner_labels.extend(ner_label)
+            # ner_batch_ids.extend([i for _ in range(len(ner_i))])
 
         p_scores_joint = torch.sum(joint_charts[batch_ids, p_is, p_js, p_labels])
         g_scores_joint = torch.sum(joint_charts[batch_ids, g_is, g_js, g_labels])
@@ -173,9 +175,30 @@ class JointModel(nn.Module):
         g_scores_parsing = torch.sum(parsing_charts[batch_ids_parsing, g_is_parsing, g_js_parsing, g_labels_parsing])
         loss_parsing = p_scores_parsing - g_scores_parsing + paugment_total_parsing
 
-        ner_score: torch.Tensor = ner_labels_score[ner_batch_ids, ner_is, ner_js, :]
-        assert ner_score.shape[0] == len(ner_labels)
-        ner_loss = self.criterion_ner(ner_score, torch.tensor(ner_labels, dtype=torch.long, device=self.device))
+        # ner loss
+        spans_mask = [
+            [[0]*i + [1]*(snt_len-i) + [0]*(seq_len-snt_len) if i < snt_len else [0]*seq_len for i in range(seq_len)]
+            for snt_len in snts_len
+        ]
+        spans_mask = np.array(spans_mask, dtype=np.bool)
+        # spans_mask = np.array(spans_mask, dtype=np.bool) * (np.random.rand(batch_size, seq_len, seq_len) < 1.0)
+        spans_label_idx = []
+        for idx, gold_tree in enumerate(joint_golds):
+            label_idx_np = np.full((snts_len[idx], snts_len[idx]), len(NER_LABELS), dtype=np.int)
+            ner_i, ner_j, ner_label = self.generate_ner_spans(gold_tree)
+            for label_idx, start_i, end_j in zip(ner_label, ner_i, ner_j):
+                label_idx_np[start_i, end_j-1] = label_idx
+                spans_mask[idx, start_i, end_j-1] = True
+            spans_label_idx.extend(label_idx_np[spans_mask[idx, :snts_len[idx], :snts_len[idx]]].tolist())
+        assert np.sum(np.array(spans_mask)) == len(spans_label_idx)
+
+        target = torch.tensor(spans_label_idx, dtype=torch.long, device=self.device)
+        spans_mask_tensor = torch.tensor(spans_mask, dtype=torch.bool, device=self.device).unsqueeze(3)
+        ner_loss = self.criterion_ner(torch.masked_select(ner_labels_score, spans_mask_tensor).view(-1, len(NER_LABELS)+1), target)
+
+        # ner_score: torch.Tensor = ner_labels_score[ner_batch_ids, ner_is, ner_js, :]
+        # assert ner_score.shape[0] == len(ner_labels)
+        # ner_loss = self.criterion_ner(ner_score, torch.tensor(ner_labels, dtype=torch.long, device=self.device))
 
         loss = loss_joint + self.lambda_scaler*((self.alpha_scaler+1.)*loss_parsing + (1.-self.alpha_scaler)*ner_loss)
         return loss

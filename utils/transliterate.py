@@ -175,3 +175,7 @@ BERT_TOKEN_MAPPING = {
     "\u2013": "-",  # en dash
     "\u2014": "-",  # em dash
 }
+
+BERT_UNREADABLE_CODES_MAPPING = {
+    "�": "。",
+}

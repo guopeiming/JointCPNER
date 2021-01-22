@@ -46,7 +46,7 @@ class BertEncoderNER(nn.Module):
         snts = insts['snts']
         snt_lens = [len(snt) for snt in snts]
         batch_size, seq_len = len(snt_lens), max(snt_lens)
-        words_repr = self.encoder(snts)
+        words_repr = self.encoder(snts)[:, :-1, :]
         assert (batch_size, seq_len) == words_repr.shape[:-1]
 
         labels = insts.get('golds', None)
@@ -189,11 +189,11 @@ class SpanNER(nn.Module):
         snt_lens = [len(snt) for snt in snts]
         batch_size, seq_len = len(snt_lens), max(snt_lens)
         words_repr = self.encoder(snts)
-        assert (batch_size, seq_len) == words_repr.shape[:-1]
+        assert (batch_size, seq_len+1) == words_repr.shape[:-1]
 
-        # [batch_size, seq_len, seq_len, dim]
+        # [batch_size, seq_len+1, seq_len+1, dim]
         spans_repr = words_repr.unsqueeze(1) - words_repr.unsqueeze(2)
-        label_score = self.label_classifier(spans_repr)
+        label_score = self.label_classifier(spans_repr[:, :-1, 1:, :])
         empty_label = torch.full((batch_size, seq_len, seq_len, 1), 0., device=self.device)
         label_score = torch.cat([label_score, empty_label], dim=-1)
 
@@ -224,18 +224,20 @@ class SpanNER(nn.Module):
             [[0]*i + [1]*(snt_len-i) + [0]*(seq_len-snt_len) if i < snt_len else [0]*seq_len for i in range(seq_len)]
             for snt_len in snt_lens
         ]
-        spans_mask_tensor = torch.tensor(spans_mask, dtype=torch.bool, device=self.device).unsqueeze(3)
+        spans_mask = np.array(spans_mask, dtype=np.bool)
+        # spans_mask = np.array(spans_mask, dtype=np.bool) * (np.random.rand(batch_size, seq_len, seq_len) < 1.0)
         spans_label_idx = []
         for idx, gold_tag in enumerate(gold_tags):
             label_idx_np = np.full((snt_lens[idx], snt_lens[idx]), len(self.vocab), dtype=np.int)
             spans = self.generate_spans(gold_tag)
             for label_idx, (start_i, end_j) in spans:
                 label_idx_np[start_i, end_j-1] = label_idx
-            for i in range(snt_lens[idx]):
-                spans_label_idx.extend(label_idx_np[i, i:].tolist())
+                spans_mask[idx, start_i, end_j-1] = True
+            spans_label_idx.extend(label_idx_np[spans_mask[idx, :snt_lens[idx], :snt_lens[idx]]].tolist())
         assert np.sum(np.array(spans_mask)) == len(spans_label_idx)
 
         target = torch.tensor(spans_label_idx, dtype=torch.long, device=self.device)
+        spans_mask_tensor = torch.tensor(spans_mask, dtype=torch.bool, device=self.device).unsqueeze(3)
         loss = self.criterion(torch.masked_select(label_score, spans_mask_tensor).view(-1, len(self.vocab)+1), target)
         return loss
 
@@ -359,7 +361,7 @@ class NEREncoder(nn.Module):
             ], 2)
         # [batch_size, seq_len, dim]
         words_repr = torch.cat([
-                hidden_states[:, :-2, :self.d_model//2], hidden_states[:, 1:-1, self.d_model//2:]
+                hidden_states[:, :-1, :self.d_model//2], hidden_states[:, 1:, self.d_model//2:]
             ], dim=2)
         return words_repr
 

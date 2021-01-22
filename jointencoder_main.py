@@ -46,7 +46,9 @@ def preprocess() -> argparse.Namespace:
     # ====== cuda enable ====== #
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpuid)
     args.device = torch.device('cuda') if args.cuda and torch.cuda.is_available() else torch.device('cpu')
+    # ====== others ====== #
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+    torch.set_num_threads(6)
     print(args, end='\n\n')
     return args
 

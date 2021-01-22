@@ -10,7 +10,7 @@ import datetime
 import numpy as np
 from utils.optim import Optim
 from utils import joint_evaluate
-from model.JointModel import JointModel
+from model.JointemptyMdoel import JointModel
 from torch.utils.data import DataLoader
 from config.joint_args import parse_args
 from utils.visual_logger import VisualLogger
