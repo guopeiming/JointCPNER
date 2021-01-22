@@ -1,5 +1,6 @@
 # @Author : guopeiming
 # @Contact : guopeiming.gpm@{qq, gmail}.com
+from config.Constants import PRETRAIN_CONTINUE_TREE, PRETRAIN_NEGTIVE_TREE
 import os
 import numpy as np
 import random
@@ -102,6 +103,7 @@ class Tree(object):
                 else:
                     subtree_str += child.label + '/'
                     subtree_leaf_str += child.label + '/'
+            all(span0[1] == span1[0] for span0, span1 in zip(children_span, children_span[1:]))
             subtree_span.append([self.left, self.right, subtree_str])
             if subtree_str != subtree_leaf_str:
                 subtree_span.append([self.left, self.right, subtree_leaf_str])
@@ -172,17 +174,54 @@ class PretrainData(object):
         self.data_list: List[Tuple[List[List[int, int, str]], List[List[int, int, int]]]] = []
 
     def get_input_data(self) -> Tuple[List[List[Union[int, str]]], List[List[int]], List[str]]:
-        if not self.snt:
-            tree = generate_tree_from_str(self.tree)
-            leaves = list(tree.leaves())
+        if isinstance(self.tree, str):
+            self.tree = generate_tree_from_str(self.tree)
+            leaves = list(self.tree.leaves())
             self.snt = [item[1] for item in leaves]
             self.head = [item[0] for item in leaves]
-            tree.generate_data_list(self.data_list, self.head)
+            self.tree.generate_data_list(self.data_list, self.head)
             random.shuffle(self.data_list)
+        p = np.random.rand()
+        if p < 0.75:
+            return self.generate_no_cross_data()
+        else:
+            idx_list = []
+            for i, (subtree_span, children_span) in enumerate(self.data_list):
+                if len(children_span) >= 2:
+                    idx_list.append(i)
+            if len(idx_list) == 0:
+                return self.generate_no_cross_data()
+
+            # generate right start and end
+            span_idx = np.random.choice(idx_list)
+            subtree_span, children_span = self.data_list[span_idx]
+            start, end = np.random.choice(list(range(subtree_span[0][0], subtree_span[0][1]+1)), 2)
+            if start > end:
+                start, end = end, start
+            if start == end:
+                if start - subtree_span[0][0] < subtree_span[0][1] - start:
+                    end = subtree_span[0][1]
+                else:
+                    start = subtree_span[0][0]
+            for child_span in children_span:
+                if start == child_span[0] and end == child_span[1]:
+                    start = subtree_span[0][0]
+                    end = subtree_span[0][1]
+
+            # generate cross point and label
+            flag = 0
+            cross_point = []
+            for point in ([span[0] for span in children_span] + [children_span[-1][1]]):
+                if start == point or end == point:
+                    flag += 1
+                if start < point < end:
+                    cross_point.append(point)
+            subtree_label = PRETRAIN_CONTINUE_TREE if flag == 2 else PRETRAIN_NEGTIVE_TREE
+            return [[start, end, subtree_label]], [[start, end, point] for point in cross_point], self.snt.copy()
+
+    def generate_no_cross_data(self):
         rand_num = np.random.randint(0, len(self.data_list))
-
         subtree_span, children_span = self.data_list[rand_num]
-
         return [item.copy() for item in subtree_span], [item.copy() for item in children_span], self.snt.copy()
 
 
@@ -218,13 +257,16 @@ class Vocab(object):
         else:
             return self.id2token[ids]
 
+    def add_token(self, token: str):
+        self.token2id[token] = len(self.id2token)
+        self.id2token.append(token)
+
 
 class PretrainDataset(Dataset):
-    def __init__(self, data: List[PretrainData], subtree_vocab: Vocab, head_vocab: Vocab, token_vocab: Vocab):
+    def __init__(self, data: List[PretrainData], subtree_vocab: Vocab, token_vocab: Vocab):
         super(PretrainDataset, self).__init__()
         self.dataset = data
         self.subtree_vocab = subtree_vocab
-        self.head_vocab = head_vocab
         self.token_vocab = token_vocab
 
     def __len__(self):
@@ -235,16 +277,17 @@ class PretrainDataset(Dataset):
 
         # children_span
         for span in children_span:
-            span[2] = self.head_vocab.encode(snt[span[2]])
+            span[2] = self.token_vocab.encode(snt[span[2]])
 
-        # subtree_span
-        for span in subtree_span:
-            span[2] = self.subtree_vocab.encode(span[2])
+        assert 1 <= len(subtree_span) <= 2
+        subtree = [subtree_span[0][0], subtree_span[0][1], self.subtree_vocab.encode(subtree_span[0][2])]
+        if subtree[2] == self.subtree_vocab.unkid:
+            subtree[2] = self.subtree_vocab.encode(subtree_span[-1][2])
 
-        return {'subtree_span': subtree_span, 'children_span': children_span, 'snt': snt}
+        return {'subtree_span': subtree, 'children_span': children_span, 'snt': snt}
 
 
-def aggregate_collate_fn(insts) -> Dict[str, List[List[Union[str, List[int]]]]]:
+def aggregate_collate_fn(insts) -> Dict[str, List[List[Union[int, str, List[int]]]]]:
     """aggregate the instance to the max seq length in batch
     Args:
         insts: list of sample
@@ -261,8 +304,8 @@ def aggregate_collate_fn(insts) -> Dict[str, List[List[Union[str, List[int]]]]]:
 
 
 def batch_filter(
-    insts: Dict[str, List[List[Union[str, List[int]]]]], DATASET_MAX_SNT_LENGTH: int
-) -> Tuple[Dict[str, List[List[Union[str, List[int]]]]], int, int]:
+    insts: Dict[str, List[List[Union[int, str, List[int]]]]], DATASET_MAX_SNT_LENGTH: int
+) -> Tuple[Dict[str, List[List[Union[int, str, List[int]]]]], int, int]:
     subtree_spans, snts, children_spans = insts['subtree_spans'], insts['snts'], insts['children_spans']
     res_subtree_spans, res_snts, res_children_spans = [], [], []
     max_len = 0
@@ -284,8 +327,8 @@ def batch_filter(
 
 
 def batch_spliter(
-    insts: Dict[str, List[Union[str, List[List[int]]]]], max_len: int, BATCH_MAX_SNT_LENGTH: int
-) -> List[Dict[str, List[List[Union[str, List[int]]]]]]:
+    insts: Dict[str, List[Union[int, str, List[List[int]]]]], max_len: int, BATCH_MAX_SNT_LENGTH: int
+) -> List[Dict[str, List[List[Union[int, str, List[int]]]]]]:
     sub_batch_times = (max_len // BATCH_MAX_SNT_LENGTH) + 1
     res = []
     for i in range(sub_batch_times):
@@ -301,8 +344,9 @@ def load_dataset(path: str):
     return data_list
 
 
-def load_data(path: str, batch_size: int, shuffle: bool, num_workers: int, drop_last: bool)\
-        -> Tuple[DataLoader, DataLoader, Vocab, Vocab, Vocab]:
+def load_data(
+    path: str, batch_size: int, shuffle: bool = True, num_workers: int = 0, drop_last: bool = True
+) -> Tuple[DataLoader, DataLoader, Vocab, Vocab, Vocab]:
     """load the datasets.
     Args:
         path: path of input data.
@@ -320,14 +364,14 @@ def load_data(path: str, batch_size: int, shuffle: bool, num_workers: int, drop_
     print('len(dev_data): %d' % len(dev_data_list), flush=True)
 
     subtree_vocab = Vocab(os.path.join(path, 'subtree.vocab'))
-    head_vocab = Vocab(os.path.join(path, 'head.vocab'))
+    subtree_vocab.add_token(PRETRAIN_NEGTIVE_TREE)
+    subtree_vocab.add_token(PRETRAIN_CONTINUE_TREE)
     token_vocab = Vocab(os.path.join(path, 'token.vocab'))
     print('len(subtree_vocab): %d' % len(subtree_vocab))
-    print('len(head_vocab): %d' % len(head_vocab))
     print('len(toekn_vocab): %d' % len(token_vocab), flush=True)
 
     train_dataloader = DataLoader(
-        PretrainDataset(train_data_list, subtree_vocab, head_vocab, token_vocab),
+        PretrainDataset(train_data_list, subtree_vocab, token_vocab),
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
@@ -335,11 +379,11 @@ def load_data(path: str, batch_size: int, shuffle: bool, num_workers: int, drop_
         drop_last=drop_last
     )
     dev_dataloader = DataLoader(
-        PretrainDataset(dev_data_list, subtree_vocab, head_vocab, token_vocab),
+        PretrainDataset(dev_data_list, subtree_vocab, token_vocab),
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
         collate_fn=aggregate_collate_fn,
         drop_last=drop_last
     )
-    return train_dataloader, dev_dataloader, subtree_vocab, head_vocab, token_vocab
+    return train_dataloader, dev_dataloader, subtree_vocab, token_vocab

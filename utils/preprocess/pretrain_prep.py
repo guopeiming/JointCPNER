@@ -312,13 +312,13 @@ def multi_process_annotate():
     print('all subprocess ends.')
 
 
-def check_subtree_infor(subtree_counter: Counter, cp_tree: Tree, head_counter: Counter, head_list: List[int], token_list: List[str]):
+def check_subtree_infor(subtree_counter: Counter, cp_tree: Tree, head_list: List[int], token_list: List[str]):
     height = 0
     if cp_tree.is_leaf:
         return 0
     else:
         for child in cp_tree.children:
-            height_temp = check_subtree_infor(subtree_counter, child, head_counter, head_list, token_list)
+            height_temp = check_subtree_infor(subtree_counter, child, head_list, token_list)
             if height < height_temp+1:
                 height = height_temp+1
 
@@ -330,10 +330,7 @@ def check_subtree_infor(subtree_counter: Counter, cp_tree: Tree, head_counter: C
                 head_idx = head_idx-1
                 if not (cp_tree.left <= head_idx < cp_tree.right):
                     num += 1
-                    head_counter[token_list[head_idx]] += 1
             assert num == 1
-        else:
-            head_counter[token_list[cp_tree.right-1]] += 1
 
         # subtree
         subtree_str = ''
@@ -354,20 +351,18 @@ def check_subtree_infor(subtree_counter: Counter, cp_tree: Tree, head_counter: C
 
 
 def generate_pretrain_dataset(
-    cp_file: str, dp_file: str, ner_file: str, data_file: str, subtree_file: str, head_file: str, token_file: str,
+    cp_file: str, dp_file: str, ner_file: str, data_file: str, subtree_file: str, token_file: str,
     fre: int
 ):
 
-    special_tokens = {'(': '-LRB-', ')': '-RRB-'}
+    special_tokens = {'(': '-LRB-', ')': '-RRB-', "{": "-LCB-", "}": "-RCB-", "[": "-LSB-", "]": "-RSB-"}
     subtree_counter = Counter()
-    head_counter = Counter()
     token_counter = Counter()
     with open(cp_file, 'r', encoding='utf-8') as cp_reader,\
          open(dp_file, 'r', encoding='utf-8') as dp_reader,\
          open(ner_file, 'r', encoding='utf-8') as ner_reader,\
          open(data_file, 'w', encoding='utf-8') as data_writer,\
          open(subtree_file, 'w', encoding='utf-8') as subtree_writer,\
-         open(head_file, 'w', encoding='utf-8') as head_writer,\
          open(token_file, 'w', encoding='utf-8') as token_writer:
         for i, (cp_line, ner_line) in enumerate(zip(cp_reader, ner_reader)):
             cp_tree = generate_tree_from_str(cp_line.strip())
@@ -407,7 +402,7 @@ def generate_pretrain_dataset(
             data_writer.write(cp_tree.linearize()+'\n')
 
             # check infor
-            check_subtree_infor(subtree_counter, cp_tree, head_counter, head_list, token_list)
+            check_subtree_infor(subtree_counter, cp_tree, head_list, token_list)
 
             if i % 1000 == 0:
                 print('%d sentences are processed.' % i, flush=True)
@@ -415,9 +410,6 @@ def generate_pretrain_dataset(
         for key in subtree_counter:
             if subtree_counter[key] > fre:
                 subtree_writer.write(key+'\t'+str(subtree_counter[key])+'\n')
-        for key in head_counter:
-            if head_counter[key] > fre:
-                head_writer.write(key+'\t'+str(head_counter[key])+'\n')
         for key in token_counter:
             if token_counter[key] > fre:
                 token_writer.write(key+'\t'+str(token_counter[key])+'\n')
@@ -428,9 +420,9 @@ if __name__ == '__main__':
     # multi_process_annotate()
     start = time.time()
     generate_pretrain_dataset(
-        './data/pretrain/zh_raw.cpar.corpus', './data/pretrain/zh_raw.dpar.corpus',
-        './data/pretrain/zh_raw.ner.corpus', './data/pretrain/zh_pretrain.corpus',
-        './data/pretrain/zh_pretrain.subtree.vocab', './data/pretrain/zh_pretrain.head.vocab',
-        './data/pretrain/zh_pretrain.token.vocab', 10
+        './data/pretrain/zh.cpar.corpus', './data/pretrain/zh.dpar.corpus',
+        './data/pretrain/zh.ner.corpus', './data/pretrain_word/train.corpus',
+        './data/pretrain_word/subtree.vocab',
+        './data/pretrain_word/token.vocab', 10
     )
     print(time.time() - start)

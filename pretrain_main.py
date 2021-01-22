@@ -8,9 +8,8 @@ import argparse
 import datetime
 import numpy as np
 from utils.optim import Optim
-from typing import Tuple, List
 from config.pretrain_args import parse_args
-from model.PretrainBERT import PretrainBERT
+from model.PretrainBERT import PretrainModel
 from torch.utils.data import DataLoader
 from utils.pretrain_dataset import load_data, batch_filter, batch_spliter
 
@@ -84,23 +83,30 @@ def eval_model(
 def main():
     # ====== preprocess ====== #
     args = preprocess()
-
     # ====== Loading dataset ====== #
-    train_data, dev_data, subtree_vocab, head_vocab, token_vocab = load_data(
-        args.input, args.batch_size, args.shuffle, args.num_workers, args.drop_last
-    )
+    train_data, dev_data, subtree_vocab, token_vocab = load_data(args.input, args.batch_size)
 
     # ======= Preparing Model ======= #
     print("\nModel Preparing starts...")
-    model = PretrainBERT(
+    model = PretrainModel(
                 subtree_vocab,
-                head_vocab,
                 token_vocab,
                 # Embedding
                 args.subword,
                 args.bert,
                 args.transliterate,
+                args.d_model,
+                args.partition,
+                args.position_emb_dropout,
                 args.bert_emb_dropout,
+                args.emb_dropout,
+                args.layer_num,
+                args.hidden_dropout,
+                args.attention_dropout,
+                args.dim_ff,
+                args.nhead,
+                args.kqv_dim,
+                args.label_hidden,
                 # classifier
                 args.language,
                 args.device

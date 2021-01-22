@@ -1,119 +1,134 @@
 # @Author : guopeiming
 # @Contact : guopeiming.gpm@{qq, gmail}.com
-import torch
 import os
+import torch
 import numpy as np
 import torch.nn as nn
-from utils.pretrain_dataset import Vocab
-from typing import List, Dict, Tuple, Union
+from utils.transliterate import TRANSLITERATIONS, BERT_TOKEN_MAPPING, BERT_UNREADABLE_CODES_MAPPING
+from typing import List, Dict, Union, Tuple
 from transformers import BertModel, BertTokenizerFast
-from utils.transliterate import BERT_UNREADABLE_CODES_MAPPING, TRANSLITERATIONS, BERT_TOKEN_MAPPING
-from config.Constants import LANGS_NEED_SEG, PAD_STATEGY, TRUNCATION_STATEGY, CHARACTER_BASED
+from model.transformer import LearnedPositionalEmbedding, Transformer
+from model.partition_transformer import PartitionTransformer
+from utils.pretrain_dataset import Vocab
+from config.Constants import PAD_STATEGY, TRUNCATION_STATEGY, CHARACTER_BASED
 
 
-class PretrainBERT(nn.Module):
-
+class PretrainModel(nn.Module):
     def __init__(
         self,
         subtree_vocab: Vocab,
-        head_vocab: Vocab,
         token_vocab: Vocab,
-        subword: str,
-        bert_path: str,
-        transliterate: str,
-        bert_emb_dropout: float,
-        language: str,
-        device: torch.device
+        subword: str, bert_path: str,
+        transliterate: str, d_model: int, partition: bool,
+        position_emb_dropout: float, bert_emb_dropout: float, emb_dropout: float, layer_num: int,
+        hidden_dropout: float, attention_dropout: float, dim_ff: int, nhead: int, kqv_dim: int,
+        label_hidden: int, language: str, device: torch.device
     ):
-        super(PretrainBERT, self).__init__()
+        super(PretrainModel, self).__init__()
 
-        if language not in LANGS_NEED_SEG:
-            assert subword != CHARACTER_BASED
+        self.embeddings = EmbeddingLayer(
+            subword, bert_path, transliterate, d_model, partition,
+            position_emb_dropout, bert_emb_dropout, emb_dropout, language, device
+        )
 
-        self.bert_encoder = BERTEncoder(subword, transliterate, bert_path, device)
-        self.bert_dropout = nn.Dropout(bert_emb_dropout)
-        self.pooling = nn.AdaptiveAvgPool1d(1)
+        self.encoder = Encoder(
+            d_model, partition, layer_num, hidden_dropout, attention_dropout, dim_ff, nhead, kqv_dim, device
+        )
 
-        self.subtree_proj = nn.Linear(self.bert_encoder.BERT.config.hidden_size, len(subtree_vocab))
-        self.head_proj = nn.Linear(self.bert_encoder.BERT.config.hidden_size, len(head_vocab))
-        self.token_proj = nn.Linear(self.bert_encoder.BERT.config.hidden_size, len(token_vocab))
+        self.subtree_label_classifier = nn.Sequential(
+            nn.Linear(d_model, label_hidden),
+            nn.LayerNorm(label_hidden),
+            nn.ReLU(),
+            nn.Linear(label_hidden, len(subtree_vocab))
+        )
 
+        self.head_label_classifier = nn.Sequential(
+            nn.Linear(d_model, label_hidden),
+            nn.LayerNorm(label_hidden),
+            nn.ReLU(),
+            nn.Linear(label_hidden, len(token_vocab))
+        )
+
+        self.token_classifier = nn.Linear(d_model, len(token_vocab))
         self.criterion = nn.CrossEntropyLoss(reduction='sum')
+
         self.subtree_vocab = subtree_vocab
-        self.head_vocab = head_vocab
         self.token_vocab = token_vocab
         self.device = device
 
-    def forward(self, insts: Dict[str, List[List[Union[str, List[int]]]]]):
+    def forward(self, insts: Dict[str, List[List[Union[int, str, List[int]]]]]):
         subtree_spans, snts, children_spans = insts['subtree_spans'], insts['snts'], insts['children_spans']
         mask_lm_list = self.snts_mask(snts, subtree_spans)
-        words_repr = self.bert_dropout(self.bert_encoder(snts)[:, 1:-1, :])  # [batch_size, seq_len, dim]
-
-        snt_lens = [len(snt) for snt in snts]
-        batch_size, seq_len = len(snt_lens), max(snt_lens)
-        assert (batch_size, seq_len) == words_repr.shape[:-1]
+        embeddings, mask = self.embeddings(snts)
+        batch_size, seq_len = len(snts), max([len(snt) for snt in snts])
+        assert (batch_size, seq_len + 2) == embeddings.shape[0:2] == mask.shape[0:2]
+        words_repr = self.encoder(embeddings, mask)
+        assert (batch_size, seq_len+1) == words_repr.shape[0:2]
+        spans_repr = words_repr.unsqueeze(1) - words_repr.unsqueeze(2)  # [batch_size, seq_len+1, seq_len+1, dim]
+        assert (batch_size, seq_len+1, seq_len+1) == spans_repr.shape[0:3]
 
         # subtree spans
-        subtree_repr_list = []
-        subtree_label_list = []
+        subtree_span_i, subtree_span_j = [], []
+        subtree_label_list, subtree_batch_idx = [], []
 
-        children_repr_list = []
-        children_head_label_list = []
+        children_span_i, children_span_j = [], []
+        head_label_list, head_batch_idx = [], []
 
-        mask_token_repr_list = []
-        mask_lm_label_list = []
+        mask_token_idx = []
+        mask_token_label_list = []
+        mask_token_batch_idx = []
         assert len(subtree_spans) == len(children_spans) == len(mask_lm_list)
         for i, (subtree_span, children_span, mask_lm) in enumerate(zip(subtree_spans, children_spans, mask_lm_list)):
             # subtree span
-            for start, end, label in subtree_span:
-                subtree_repr = words_repr[i, start:end, :]
-                # [1, dim]
-                subtree_repr = self.pooling(subtree_repr.unsqueeze(0).permute(0, 2, 1)).squeeze(0).permute(1, 0)
-                subtree_repr_list.append(subtree_repr)
-                subtree_label_list.append(label)
+            subtree_span_i.append(subtree_span[0])
+            subtree_span_j.append(subtree_span[1])
+            subtree_label_list.append(subtree_span[2])
+            subtree_batch_idx.append(i)
 
             # children span -> head loss
             for start, end, label in children_span:
-                children_repr = words_repr[i, start:end, :]
-                # [1, dim]
-                children_repr = self.pooling(children_repr.unsqueeze(0).permute(0, 2, 1)).squeeze(0).permute(1, 0)
-                children_repr_list.append(children_repr)
-                children_head_label_list.append(label)
+                children_span_i.append(start)
+                children_span_j.append(end)
+                head_label_list.append(label)
+                head_batch_idx.append(i)
 
             # mask lm
-            mask_idx, mask_token_label = mask_lm[0], mask_lm[1]
-            mask_token_repr_list.append(words_repr[i, mask_idx, :].unsqueeze(0))
-            mask_lm_label_list.append(mask_token_label)
+            mask_token_idx.append(mask_lm[0])
+            mask_token_label_list.append(mask_lm[1])
+            mask_token_batch_idx.append(i)
 
-        assert len(subtree_repr_list) == len(subtree_label_list)
-        subtrees_repr = torch.cat(subtree_repr_list, dim=0)
-        subtrees_label_repr = torch.tensor(subtree_label_list, dtype=torch.long, device=self.device)
-        subtree_logits = self.subtree_proj(subtrees_repr)
-        subtree_loss = self.criterion(subtree_logits, subtrees_label_repr)
+        subtree_logits = self.subtree_label_classifier(
+            spans_repr[subtree_batch_idx, subtree_span_i, subtree_span_j, :]
+        )
+        subtree_loss = self.criterion(
+            subtree_logits, torch.tensor(subtree_label_list, dtype=torch.long, device=self.device)
+        )
 
-        assert len(children_repr_list) == len(children_head_label_list)
-        childrens_repr = torch.cat(children_repr_list, dim=0)
-        childrens_head_label_repr = torch.tensor(children_head_label_list, dtype=torch.long, device=self.device)
-        children_head_logits = self.head_proj(childrens_repr)
-        children_head_loss = self.criterion(children_head_logits, childrens_head_label_repr)
+        children_head_logits = self.head_label_classifier(
+            spans_repr[head_batch_idx, children_span_i, children_span_j, :]
+        )
+        children_head_loss = self.criterion(
+            children_head_logits, torch.tensor(head_label_list, dtype=torch.long, device=self.device)
+        )
 
-        assert len(mask_token_repr_list) == len(mask_lm_label_list)
-        mask_tokens_repr = torch.cat(mask_token_repr_list, dim=0)
-        mask_lm_label_repr = torch.tensor(mask_lm_label_list, dtype=torch.long, device=self.device)
-        mask_lm_logits = self.token_proj(mask_tokens_repr)
-        mask_lm_loss = self.criterion(mask_lm_logits, mask_lm_label_repr)
+        mask_lm_logits = self.token_classifier(words_repr[mask_token_batch_idx, mask_token_idx, :])
+        mask_lm_loss = self.criterion(
+            mask_lm_logits, torch.tensor(mask_token_label_list, dtype=torch.long, device=self.device)
+        )
 
         total_loss = subtree_loss+children_head_loss+mask_lm_loss
+
         if self.training:
             return total_loss
         else:
             return (
                 *self.get_pred(subtree_logits, children_head_logits, mask_lm_logits),
-                subtree_label_list, children_head_label_list, mask_lm_label_list
+                subtree_label_list, head_label_list, mask_token_label_list
             )
 
     def get_pred(
-        self, subtree_logits: torch.Tensor,
+        self,
+        subtree_logits: torch.Tensor,
         children_head_logits: torch.Tensor,
         mask_lm_logits: torch.Tensor
     ):
@@ -127,20 +142,7 @@ class PretrainBERT(nn.Module):
         mask_lm_label = mask_lm_label.cpu().tolist()
         return subtree_label, children_head_label, mask_lm_label
 
-    def save_models(self, path: str):
-        if not os.path.exists(path):
-            os.makedirs(path)
-        self.bert_encoder.BERT.save_pretrained(path)
-        self.bert_encoder.tokenizer.save_pretrained(path)
-        torch.save(
-            {
-                'subtree': self.subtree_proj.state_dict(),
-                'head': self.head_proj.state_dict(),
-                'mask_lm': self.token_proj.state_dict()
-            }, os.path.join(path, 'other.pt')
-        )
-
-    def snts_mask(self, snts: List[List[str]], subtree_spans: List[List[List[int]]]) -> List[Tuple[int, int]]:
+    def snts_mask(self, snts: List[List[str]], subtree_spans: List[List[int]]) -> List[Tuple[int, int]]:
         assert len(snts) == len(subtree_spans)
         mask_list = []
         for snt, subtree_span in zip(snts, subtree_spans):
@@ -149,10 +151,10 @@ class PretrainBERT(nn.Module):
             # subtree mask
             p = np.random.rand()
             if p < 0.8:
-                for idx in range(subtree_span[0][0], subtree_span[0][1]):
-                    snt[idx] = self.bert_encoder.tokenizer.mask_token
+                for idx in range(subtree_span[0], subtree_span[1]):
+                    snt[idx] = self.embeddings.tokenizer.mask_token
             elif 0.8 <= p < 0.9:
-                for idx in range(subtree_span[0][0], subtree_span[0][1], 4):
+                for idx in range(subtree_span[0], subtree_span[1], 4):
                     snt[idx] = self.token_vocab.decode(np.random.randint(0, len(self.token_vocab)))
             else:
                 pass
@@ -160,7 +162,7 @@ class PretrainBERT(nn.Module):
             # language model
             p = np.random.rand()
             if p < 0.8:
-                snt[mask_token_id] = self.bert_encoder.tokenizer.mask_token
+                snt[mask_token_id] = self.embeddings.tokenizer.mask_token
             elif 0.8 <= p < 0.9:
                 snt[mask_token_id] = self.token_vocab.decode(np.random.randint(0, len(self.token_vocab)))
             else:
@@ -168,20 +170,32 @@ class PretrainBERT(nn.Module):
             mask_list.append((mask_token_id, self.token_vocab.encode(mask_token)))
         return mask_list
 
+    def save_models(self, path: str):
+        if not os.path.exists(path):
+            os.makedirs(path)
+        self.embeddings.BERT.save_pretrained(path)
+        self.embeddings.tokenizer.save_pretrained(path)
+        torch.save(
+            {
+                'embedding.layer_norm': self.embeddings.layer_norm.state_dict(),
+                'embedding.bert_proj': self.embeddings.bert_proj.state_dict(),
+                'embedding.position_embeddings': self.embeddings.position_embeddings.state_dict(),
+                'encoder.transf': self.encoder.transf.state_dict()
+            }, os.path.join(path, 'other.pt')
+        )
 
-class BERTEncoder(nn.Module):
 
-    def __init__(self, subword: str, transliterate: str, bert: str, device: torch.device):
-        super(BERTEncoder, self).__init__()
+class EmbeddingLayer(nn.Module):
 
-        self.BERT = BertModel.from_pretrained(bert)
-        self.tokenizer = BertTokenizerFast.from_pretrained(bert)
+    def __init__(self, subword: str, bert_path: str,
+                 transliterate: str, d_model: int, partition: bool,
+                 position_emb_dropout: float, bert_emb_dropout: float, emb_dropout: float, language: str,
+                 device: torch.device):
+        super(EmbeddingLayer, self).__init__()
 
-        self.subword = subword
-        self.device = device
-        self.tranliterate = transliterate
+        self.BERT = BertModel.from_pretrained(bert_path)
+        self.tokenizer = BertTokenizerFast.from_pretrained(bert_path)
         self.bert_hidden_size = self.BERT.config.hidden_size
-
         if subword == 'max_pool':
             self.pool = nn.AdaptiveMaxPool1d(1)
         elif subword == 'avg_pool':
@@ -189,32 +203,58 @@ class BERTEncoder(nn.Module):
         else:
             self.pool = None
 
+        self.position_emb_dropout = nn.Dropout(position_emb_dropout)
+        self.bert_emb_dropout = nn.Dropout(bert_emb_dropout)
+        self.emb_dropout = nn.Dropout(emb_dropout)
+        self.layer_norm = nn.LayerNorm(d_model, elementwise_affine=True)
+
+        self.partition = partition
+        self.d_model = d_model
+        self.d_content = d_model // 2 if partition else d_model
+        self.d_position = d_model - d_model//2 if partition else d_model
+        self.bert_proj = nn.Linear(self.bert_hidden_size, self.d_content)
+
+        self.position_embeddings = LearnedPositionalEmbedding(self.d_position, max_len=512)
+
         if transliterate == '':
             self.bert_transliterate = None
         else:
             assert transliterate in TRANSLITERATIONS
             self.bert_transliterate = TRANSLITERATIONS[transliterate]
+        self.subword = subword
+        self.language = language
 
-    def forward(self, snts: List[List[str]]) -> torch.Tensor:
+        self.device = device
 
+    def forward(self, snts: List[List[str]]):
         # BERT tokenize
-        ids, bert_mask, offsets, batch_size, seq_len = self.__tokenize(snts)
+        ids, bert_mask, snts_mask, offsets = self.__tokenize(snts)
+        batch_size, seq_len = snts_mask.shape
         bert_embeddings = self.BERT(ids, attention_mask=bert_mask)[0]  # [batch_size, seq_len, dim]
-
         if self.subword != CHARACTER_BASED:
             bert_embeddings = self.__process_subword_repr(bert_embeddings, offsets, batch_size, seq_len, snts)
+        content_embeddings = self.bert_proj(self.bert_emb_dropout(bert_embeddings))
+        position_embeddings = self.position_emb_dropout(self.position_embeddings(batch_size, seq_len))
+        if self.partition:
+            embeddings = torch.cat([content_embeddings, position_embeddings.expand(batch_size, -1, -1)], dim=2)
+        else:
+            embeddings = torch.add(content_embeddings+position_embeddings)
+        assert embeddings.shape[2] == self.d_model
+        return self.emb_dropout(self.layer_norm(embeddings)), snts_mask
 
-        return bert_embeddings  # [batch_size, seq_len+2, dim]
-
-    def __tokenize(self, snts: List[List[str]]) -> Tuple[torch.Tensor, torch.Tensor, List[List[int]], int, int]:
-        """tokenize the sentences and generate offset list.
+    def __tokenize(self, snts: List[List[str]])\
+            -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, List[List[int]]]:
+        """tokenize the sentences and generate offset list and pos tags id.
         Args:
+            pos_tags:
             snts:
         Returns:
             offsets: [batch_size, seq_len], e.g., [0, 1, 1, 1, 2, 2, 3, 4] for one sentence.
         """
-        # generate batch_size, seq_len
-        batch_size, seq_len = len(snts), max(len(snt) for snt in snts)+2
+
+        # generate sents mask
+        max_len = max(len(snt) for snt in snts)
+        snts_mask = [[1]*(len(snt)+2)+[0]*(max_len-len(snt)) for snt in snts]
 
         # clean sentences
         snts_cleaned, offsets = [], []
@@ -247,7 +287,7 @@ class BERTEncoder(nn.Module):
                                 return_attention_mask=True, return_offsets_mapping=True)
         ids, attention_mask, offsets_mapping = tokens['input_ids'], tokens['attention_mask'], tokens['offset_mapping']
         if self.subword == CHARACTER_BASED:
-            assert len(ids[0]) == seq_len
+            assert len(ids[0]) == max_len+2
 
         # generate offsets list
         output_len = len(ids[0])
@@ -272,9 +312,8 @@ class BERTEncoder(nn.Module):
         return (
             torch.tensor(ids, dtype=torch.long, device=self.device),
             torch.tensor(attention_mask, dtype=torch.int, device=self.device),
-            offsets,
-            batch_size,
-            seq_len
+            torch.tensor(snts_mask, dtype=torch.int, device=self.device),
+            offsets
         )
 
     def __process_subword_repr(self, bert_embeddings: torch.Tensor, offsets: List[List[int]], batch_size: int,
@@ -343,3 +382,33 @@ class BERTEncoder(nn.Module):
         else:
             print('subword method (%s) is illegal' % self.subword)
         return bert_embeddings
+
+
+class Encoder(nn.Module):
+    def __init__(self, d_model: int, partition: bool, layer_num: int, hidden_dropout: float, attention_dropout: float,
+                 dim_ff: int, nhead: int, kqv_dim: int, device: torch.device):
+        super(Encoder, self).__init__()
+
+        self.partition = partition
+        self.d_model = d_model
+        if self.partition:
+            self.transf = PartitionTransformer(d_model, layer_num, nhead, dim_ff, hidden_dropout, attention_dropout,
+                                               'relu', kqv_dim=kqv_dim)
+        else:
+            self.transf = Transformer(d_model, layer_num, nhead, dim_ff, hidden_dropout, attention_dropout, 'relu',
+                                      kqv_dim=kqv_dim)
+
+    def forward(self, embeddings: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        hidden_states = self.transf(hidden_states=embeddings, attention_mask=mask)[0]  # [batch_size, seq_len, dim]
+        if self.partition:
+            # Rearrange the annotations to ensure that the transition to
+            # fenceposts captures an even split between position and content.
+            # TODO(nikita): try alternatives, such as omitting position entirely
+            hidden_states = torch.cat([
+                hidden_states[:, :, 0::2],
+                hidden_states[:, :, 1::2],
+            ], 2)
+        hidden_states = torch.cat([
+                hidden_states[:, :-1, :self.d_model//2], hidden_states[:, 1:, self.d_model//2:]
+            ], dim=2)
+        return hidden_states
