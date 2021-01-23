@@ -178,4 +178,5 @@ BERT_TOKEN_MAPPING = {
 
 BERT_UNREADABLE_CODES_MAPPING = {
     "�": "。",
+    '\ue03b': '。'
 }

@@ -292,7 +292,7 @@ class EmbeddingLayer(nn.Module):
                                 return_attention_mask=True, return_offsets_mapping=True)
         ids, attention_mask, offsets_mapping = tokens['input_ids'], tokens['attention_mask'], tokens['offset_mapping']
         if self.subword == CHARACTER_BASED:
-            assert len(ids[0]) == max_len+2
+            assert len(ids[0]) == max_len+2, (snts, len(ids[0]), max_len+2)
 
         # generate offsets list
         output_len = len(ids[0])
@@ -308,7 +308,7 @@ class EmbeddingLayer(nn.Module):
                     if subword_head_idx > word_tail_idx:
                         word_tail_idx = snt.find(' ', word_tail_idx+1)
                         assert word_tail_idx > subword_head_idx and subword_tail_idx <= word_tail_idx,\
-                            (snt, word_tail_idx, subword_head_idx, subword_tail_idx, word_tail_idx, offset_mapping, offset)
+                            (snt, word_tail_idx, subword_head_idx, subword_tail_idx, offset_mapping, offset)
                         word_idx += 1
                     offset.append(word_idx)
                 assert offset[-1]+1 == len(snts[i]) + (2 if attention_mask[i][-1] != 0 else 3),\
