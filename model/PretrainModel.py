@@ -307,7 +307,8 @@ class EmbeddingLayer(nn.Module):
                         break
                     if subword_head_idx > word_tail_idx:
                         word_tail_idx = snt.find(' ', word_tail_idx+1)
-                        assert word_tail_idx > subword_head_idx and subword_tail_idx <= word_tail_idx
+                        assert word_tail_idx > subword_head_idx and subword_tail_idx <= word_tail_idx,\
+                            (snt, word_tail_idx, subword_head_idx, subword_tail_idx, word_tail_idx, offset_mapping, offset)
                         word_idx += 1
                     offset.append(word_idx)
                 assert offset[-1]+1 == len(snts[i]) + (2 if attention_mask[i][-1] != 0 else 3),\
