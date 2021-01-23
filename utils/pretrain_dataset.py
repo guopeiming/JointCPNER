@@ -367,7 +367,7 @@ def load_data(
     dev_data_list = load_dataset(os.path.join(path,  ('small.'if debug else '')+'dev.corpus'))
     print('len(dev_data): %d' % len(dev_data_list), flush=True)
 
-    fre_dict = {'english': (13, 30), CHARACTER_BASED: (13, 30), 'NONE'+CHARACTER_BASED: (13, 50)}
+    fre_dict = {'english': (13, 30), CHARACTER_BASED: (13, 30), 'NONE'+CHARACTER_BASED: (13, 75)}
     if language == 'english':
         subtree_fre, token_fre = fre_dict[language]
     elif language == 'chinese' and subword == CHARACTER_BASED:
@@ -382,7 +382,7 @@ def load_data(
     subtree_vocab.add_token(PRETRAIN_CONTINUE_TREE)
     token_vocab = Vocab(os.path.join(path,  ('small.'if debug else '')+'token.vocab'), token_fre)
     print('len(subtree_vocab): %d' % len(subtree_vocab))
-    print('len(toekn_vocab): %d' % len(token_vocab), flush=True)
+    print('len(token_vocab): %d' % len(token_vocab), flush=True)
 
     train_dataloader = DataLoader(
         PretrainDataset(train_data_list, subtree_vocab, token_vocab),
