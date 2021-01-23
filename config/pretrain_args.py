@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--weight_decay', default=1e-2, type=float, help='lambda')
     parser.add_argument('--clip_grad', default=False, type=bool, help='whether to ues util.clip')
     parser.add_argument('--clip_grad_max_norm', default=4.0, type=float, help='clip_grad_max_norm')
-    parser.add_argument('--warmup_steps', default=8000, type=int, help='warm up steps')
+    parser.add_argument('--warmup_steps', default=20000, type=int, help='warm up steps')
     parser.add_argument('--lr_decay_factor', default=1.000001, type=float, help='decay factor of lr after warm up')
 
     # [Model]
