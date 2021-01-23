@@ -1,7 +1,6 @@
 import os
 import json
 import time
-from tqdm import tqdm
 from spacy import Language
 from typing import Counter, List, Set, Union
 import collections
@@ -135,9 +134,21 @@ class Tree(object):
             text = ' '.join([child.linearize_add_pos() for child in self.children])
             return '(%s %s)' % (self.label, text)
 
+    def linearize_convert_char(self, head_lists: List[List[int]]):
+        if self.is_leaf:
+            head_list = head_lists[self.left]
+            assert len(head_list) == len(self.word)
+            text = ''
+            for i in range(len(self.word)):
+                text += '(%s %s) ' % (str(head_list[i]), self.word[i])
+            return text[:-1]
+        else:
+            text = ' '.join([child.linearize_convert_char(head_lists) for child in self.children])
+        return '(%s %s)' % (self.label, text)
+
     def leaves(self):
         if self.is_leaf:
-            yield self.word
+            yield (self.label, self.word)
         else:
             for child in self.children:
                 yield from child.leaves()
@@ -236,7 +247,7 @@ def sent_cleaning(sent: str, language: str, special_tokens: Set):
             if (language == 'zh') and ((i == len(sent)-1) or i == 0 or (is_chinese(sent[i-1]) and is_chinese(sent[i+1])) or res[-1]==' '):
                 char = ''
         if char in special_tokens:
-            char = ('' if len(res) == 0 or res[-1]== ' ' else ' ') +char+' '
+            char = ('' if len(res) == 0 or res[-1] == ' ' else ' ') + char+' '
         res += char
     return res
 
@@ -327,7 +338,6 @@ def check_subtree_infor(subtree_counter: Counter, cp_tree: Tree, head_list: List
         if not cp_tree.label.startswith('NamedEntity'):
             num = 0
             for head_idx in head_list[cp_tree.left: cp_tree.right]:
-                head_idx = head_idx-1
                 if not (cp_tree.left <= head_idx < cp_tree.right):
                     num += 1
             assert num == 1
@@ -380,7 +390,7 @@ def generate_pretrain_dataset(
                 assert len(dp_list) == 4
                 if dp_list[0] in special_tokens:
                     dp_list[0] = special_tokens[dp_list[0]]
-                head_list.append(int(dp_list[2]))
+                head_list.append(int(dp_list[2])-1)
                 token_list.append(dp_list[0])
                 token_counter[dp_list[0]] += 1
 
@@ -390,7 +400,7 @@ def generate_pretrain_dataset(
 
             cp_tree_str = cp_tree_str_list[0]
             for head_i in range(len(head_list)):
-                cp_tree_str = cp_tree_str + str(head_list[head_i]-1) + cp_tree_str_list[head_i+1]
+                cp_tree_str = cp_tree_str + str(head_list[head_i]) + cp_tree_str_list[head_i+1]
                 assert cp_tree_str_list[head_i+1][0:len(token_list[head_i])+1] == ' '+token_list[head_i]
 
             # adding ner infor to cp tree
@@ -415,14 +425,58 @@ def generate_pretrain_dataset(
                 token_writer.write(key+'\t'+str(token_counter[key])+'\n')
 
 
+def convert_word_to_char_dataset(path: str, char_path: str, subtree_path: str, token_path: str, fre: int):
+    subtree_counter, token_counter = Counter(), Counter()
+    with open(path, 'r', encoding='utf-8') as reader,\
+         open(char_path, 'w', encoding='utf-8') as tree_writer,\
+         open(subtree_path, 'w', encoding='utf-8') as subtree_writer,\
+         open(token_path, 'w', encoding='utf-8') as token_writer:
+        for line_i, line in enumerate(reader):
+            tree = generate_tree_from_str(line.strip())
+            leaves = list(tree.leaves())
+            word_head_list = [int(item[0]) for item in leaves]
+            word_list = [item[1] for item in leaves]
+            char_head_list = []
+            for i, word in enumerate(word_list):
+                head_list = []
+                cur_word_head = len(''.join(word_list[:i+1]))-1
+                for _ in range(len(word)-1):
+                    head_list.append(cur_word_head)
+                head_list.append(len(''.join(word_list[:word_head_list[i]+1]))-1)
+                char_head_list.append(head_list)
+            tree_str = tree.linearize_convert_char(char_head_list)
+            tree_writer.write(tree_str+'\n')
+            tree = generate_tree_from_str(tree_str)
+            leaves = list(tree.leaves())
+            head_list = [int(item[0]) for item in leaves]
+            token_list = [item[1] for item in leaves]
+            for token in token_list:
+                token_counter[token] += 1
+            check_subtree_infor(subtree_counter, tree, head_list, token_list)
+
+            if line_i % 1000 == 0:
+                print('%d sentences are processed.' % line_i, flush=True)
+
+        for key in subtree_counter:
+            if subtree_counter[key] > fre:
+                subtree_writer.write(key+'\t'+str(subtree_counter[key])+'\n')
+        for key in token_counter:
+            if token_counter[key] > fre:
+                token_writer.write(key+'\t'+str(token_counter[key])+'\n')
+
+
 if __name__ == '__main__':
     # annotate_main(7, './data/pretrain/small.corpus', 'zh')
     # multi_process_annotate()
+    # generate_pretrain_dataset(
+    #     './data/pretrain/zh.cpar.corpus', './data/pretrain/zh.dpar.corpus',
+    #     './data/pretrain/zh.ner.corpus', './data/pretrain_word/train.corpus',
+    #     './data/pretrain_word/subtree.vocab',
+    #     './data/pretrain_word/token.vocab', 10
+    # )
     start = time.time()
-    generate_pretrain_dataset(
-        './data/pretrain/zh.cpar.corpus', './data/pretrain/zh.dpar.corpus',
-        './data/pretrain/zh.ner.corpus', './data/pretrain_word/train.corpus',
-        './data/pretrain_word/subtree.vocab',
-        './data/pretrain_word/token.vocab', 10
+    convert_word_to_char_dataset(
+        './data/pretrain_word/dev.corpus', './data/pretrain_char/dev.corpus',
+        './data/pretrain_char/dev.subtree.vocab', './data/pretrain_char/dev.token.vocab', 10
     )
     print(time.time() - start)

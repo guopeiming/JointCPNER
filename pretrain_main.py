@@ -9,7 +9,7 @@ import datetime
 import numpy as np
 from utils.optim import Optim
 from config.pretrain_args import parse_args
-from model.PretrainBERT import PretrainModel
+from model.PretrainModel import PretrainModel
 from torch.utils.data import DataLoader
 from utils.pretrain_dataset import load_data, batch_filter, batch_spliter
 
@@ -84,7 +84,9 @@ def main():
     # ====== preprocess ====== #
     args = preprocess()
     # ====== Loading dataset ====== #
-    train_data, dev_data, subtree_vocab, token_vocab = load_data(args.input, args.batch_size)
+    train_data, dev_data, subtree_vocab, token_vocab = load_data(
+        args.input, args.batch_size, args.language, args.subword, args.debug
+    )
 
     # ======= Preparing Model ======= #
     print("\nModel Preparing starts...")
@@ -161,12 +163,14 @@ def main():
                 if best_dev < dev_acc:
                     best_dev = dev_acc
                     patience = args.patience
-                    model.save_models(args.save_path)
+                    model.save_models(os.path.join(args.save_path, 'best.model/'))
                 print('best performance: dev:%.03f' % (best_dev*100))
                 print('model evaluating ends...', flush=True)
                 if args.early_stop:
                     if patience < 0:
                         break
+            if steps % (args.accum_steps * args.save_interval) == 0:
+                model.save_models(os.path.join(args.save_path, str(steps)+'.steps.model/'))
             steps += 1
 
         if args.early_stop:

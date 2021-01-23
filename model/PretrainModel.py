@@ -183,6 +183,11 @@ class PretrainModel(nn.Module):
                 'encoder.transf': self.encoder.transf.state_dict()
             }, os.path.join(path, 'other.pt')
         )
+        with open(os.path.join(path, 'READ.ME'), 'w', encoding='UTF-8') as writer:
+            writer.write('subword: '+self.embeddings.subword+'\n')
+            writer.write('language: '+self.embeddings.language+'\n')
+            writer.write('path: '+path+'\n')
+        print('model is saved in %s' % path)
 
 
 class EmbeddingLayer(nn.Module):

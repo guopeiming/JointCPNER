@@ -1,6 +1,6 @@
 # @Author : guopeiming
 # @Contact : guopeiming.gpm@{qq, gmail}.com
-from config.Constants import PRETRAIN_CONTINUE_TREE, PRETRAIN_NEGTIVE_TREE
+from config.Constants import CHARACTER_BASED, PRETRAIN_CONTINUE_TREE, PRETRAIN_NEGTIVE_TREE
 import os
 import numpy as np
 import random
@@ -227,23 +227,26 @@ class PretrainData(object):
 
 class Vocab(object):
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, fre: int = -1) -> None:
         super(Vocab, self).__init__()
-        self.id2token = ['<UNK>']
-        self.token2id = {'<UNK>': 0}
+        self.id2token = ['[UNK]']
+        self.token2id = {'[UNK]': 0}
         self.unkid = 0
-        self.unklabel = '<UNK>'
-        self.vocab_init(path)
+        self.unklabel = '[UNK]'
+        self.vocab_init(path, fre)
 
     def __len__(self):
         return len(self.id2token)
 
-    def vocab_init(self, path: str):
+    def vocab_init(self, path: str, fre: int):
         with open(path, 'r', encoding='utf-8') as reader:
             for line in reader:
-                word = line.strip().split('\t')[0]
-                self.token2id[word] = len(self.id2token)
-                self.id2token.append(word)
+                contents = line.strip().split('\t')
+                word = contents[0]
+                num = int(contents[1])
+                if num >= fre:
+                    self.token2id[word] = len(self.id2token)
+                    self.id2token.append(word)
 
     def encode(self, tokens: Union[str, List[str]]):
         if isinstance(tokens, list):
@@ -345,7 +348,8 @@ def load_dataset(path: str):
 
 
 def load_data(
-    path: str, batch_size: int, shuffle: bool = True, num_workers: int = 0, drop_last: bool = True
+    path: str, batch_size: int, language: str, subword: str, debug: bool, shuffle: bool = True, num_workers: int = 0,
+    drop_last: bool = True
 ) -> Tuple[DataLoader, DataLoader, Vocab, Vocab, Vocab]:
     """load the datasets.
     Args:
@@ -358,15 +362,25 @@ def load_data(
     Returns:
     """
     print('data loading starts...', flush=True)
-    train_data_list = load_dataset(os.path.join(path, 'train.corpus'))
+    train_data_list = load_dataset(os.path.join(path, ('small.'if debug else '')+'train.corpus'))
     print('len(train_data): %d' % len(train_data_list), flush=True)
-    dev_data_list = load_dataset(os.path.join(path, 'dev.corpus'))
+    dev_data_list = load_dataset(os.path.join(path,  ('small.'if debug else '')+'dev.corpus'))
     print('len(dev_data): %d' % len(dev_data_list), flush=True)
 
-    subtree_vocab = Vocab(os.path.join(path, 'subtree.vocab'))
+    fre_dict = {'english': (13, 30), CHARACTER_BASED: (13, 30), 'NONE'+CHARACTER_BASED: (13, 40)}
+    if language == 'english':
+        subtree_fre, token_fre = fre_dict[language]
+    elif language == 'chinese' and subword == CHARACTER_BASED:
+        subtree_fre, token_fre = fre_dict[CHARACTER_BASED]
+    elif language == 'chinese' and subword != CHARACTER_BASED:
+        subtree_fre, token_fre = fre_dict['NONE'+CHARACTER_BASED]
+    else:
+        print('language and subword error')
+        exit(-1)
+    subtree_vocab = Vocab(os.path.join(path,  ('small.'if debug else '')+'subtree.vocab'), subtree_fre)
     subtree_vocab.add_token(PRETRAIN_NEGTIVE_TREE)
     subtree_vocab.add_token(PRETRAIN_CONTINUE_TREE)
-    token_vocab = Vocab(os.path.join(path, 'token.vocab'))
+    token_vocab = Vocab(os.path.join(path,  ('small.'if debug else '')+'token.vocab'), token_fre)
     print('len(subtree_vocab): %d' % len(subtree_vocab))
     print('len(toekn_vocab): %d' % len(token_vocab), flush=True)
 
