@@ -3,7 +3,6 @@
 import os
 import time
 import torch
-import fitlog
 import random
 import argparse
 import datetime
@@ -13,7 +12,6 @@ from utils import joint_evaluate
 from model.JointModel import JointModel
 from torch.utils.data import DataLoader
 from config.joint_args import parse_args
-from utils.visual_logger import VisualLogger
 from utils.trees import InternalTreebankNode
 from typing import Tuple, List, Set, Union, Dict
 from utils.joint_dataset import load_data, batch_filter, batch_spliter, write_joint_data
@@ -37,12 +35,6 @@ def preprocess() -> argparse.Namespace:
     args.save_path = os.path.join('./logs/', 'my_log-' + now_time)
     if not os.path.exists(args.save_path) and not args.debug:
         os.makedirs(args.save_path)
-    # ====== fitlog init ====== #
-    fitlog.commit(__file__)
-    fitlog.debug(args.debug)
-    fitlog.add_hyper(args)
-    # ====== tb VisualLogger init ====== #
-    args.visual_logger = VisualLogger(args.save_path) if not args.debug else None
     # ====== cuda enable ====== #
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpuid)
     args.device = torch.device('cuda') if args.cuda and torch.cuda.is_available() else torch.device('cpu')
@@ -56,8 +48,6 @@ def preprocess() -> argparse.Namespace:
 def postprocess(args: argparse.Namespace, start: float):
     exe_time = time.time() - start
     print('Executing time: %dh:%dm:%ds.' % (exe_time//3600, (exe_time//60) % 60, exe_time % 60))
-    fitlog.finish()
-    args.visual_logger.close()
     print('training ends.')
 
 
@@ -103,12 +93,10 @@ def main():
                 # cross_labels_idx,
                 # Embedding
                 args.subword,
-                args.use_pos_tag,
                 args.bert_path,
                 args.transliterate,
                 args.d_model,
                 args.partition,
-                args.pos_tag_emb_dropout,
                 args.position_emb_dropout,
                 args.bert_emb_dropout,
                 args.emb_dropout,
@@ -126,7 +114,11 @@ def main():
                 args.alpha_scaler,
                 args.language,
                 args.device
-            ).cuda()
+            )
+    if args.pretrain_model_path is not False:
+        model.load_pretrain_model(args.pretrain_model_path)
+    if args.cuda:
+        model = model.cuda()
     # print(model, end='\n\n\n')
     optimizer = Optim(model, args.optim, args.lr, args.lr_fine_tune, args.warmup_steps, args.lr_decay_factor,
                       args.weight_decay, args.clip_grad, args.clip_grad_max_norm)
@@ -157,8 +149,6 @@ def main():
                     loss_value += loss.item()
                     assert not isinstance(loss_value, torch.Tensor), 'GPU memory leak'
 
-            if batch_i == args.accum_steps and not args.debug:
-                args.visual_logger.visual_histogram(model, steps//args.accum_steps)
             if steps % args.accum_steps == 0:
                 optimizer.step()
                 optimizer.zero_grad()
@@ -168,11 +158,6 @@ def main():
                     (epoch_i, args.epoch, batch_i//args.accum_steps, len(train_data)//args.accum_steps,
                      loss_value/total_batch_size), flush=True
                 )
-                visual_dic = {'loss/train': loss_value, 'lr': optimizer.get_lr()[0]}
-                if args.clip_grad:
-                    visual_dic['norm'] = optimizer.get_dynamic_gard_norm()
-                if not args.debug:
-                    args.visual_logger.visual_scalars(visual_dic, steps // args.accum_steps)
                 loss_value, total_batch_size = 0., 0
                 torch.cuda.empty_cache()
             if steps % (args.accum_steps * args.eval_interval) == 0:
@@ -185,20 +170,11 @@ def main():
                     model, test_data, args.language, args.subword, args.DATASET_MAX_SNT_LENGTH,
                     args.BATCH_MAX_SNT_LENGTH, args.evalb_path, 'test'
                 )
-                visual_dic = {
-                    'F/parsing_dev': joint_fscore_dev.parsing_f, 'F/parsing_test': joint_fscore_test.parsing_f,
-                    'F/ner_dev': joint_fscore_dev.ner_f, 'F/ner_test': joint_fscore_test.ner_f
-                }
-                if not args.debug:
-                    args.visual_logger.visual_scalars(visual_dic, steps // args.accum_steps)
                 if best_dev is None or joint_fscore_dev.parsing_f > best_dev.parsing_f:
                     best_dev, best_test = joint_fscore_dev, joint_fscore_test
-                    fitlog.add_best_metric({'parsing_f_dev': best_dev.parsing_f, 'ner_f_test': best_test.ner_f})
                     patience = args.patience
                     write_joint_data(args.save_path, res_data_dev, 'dev')
                     write_joint_data(args.save_path, res_data_test, 'test')
-                    if args.save:
-                        torch.save(model.pack_state_dict(), os.path.join(args.save_path, args.name+'.best.model.pt'))
                 print('best performance:\ndev: %s\ntest: %s' % (best_dev, best_test))
                 print('model evaluating ends...', flush=True)
                 del res_data_dev, res_data_test

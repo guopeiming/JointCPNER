@@ -53,8 +53,8 @@ class Optim:
         self.clip_grad_max_norm = clip_grad_max_norm
         self.scheduler = LRScheduler(self._optimizer, lr_lambdas_group)
         self.dynamic_norm = 0.0
-        print('len(total_parameters): %d, len(fine_tuned_parameters): %d, ratio: %.05f'
-              % (params_total, params_finetune, params_finetune/params_total), end='\n\n')
+        print('len(total_parameters): %d, len(fine_tuned_parameters): %d, ratio: %.03f'
+              % (params_total, params_finetune, params_finetune/params_total*100), end='\n\n')
 
     def zero_grad(self):
         self._optimizer.zero_grad()

@@ -1,5 +1,6 @@
 # @Author : guopeiming
 # @Contact : guopeiming.gpm@{qq, gmail}.com
+import os
 import torch
 from queue import Queue
 import numpy as np
@@ -11,22 +12,22 @@ from utils.transliterate import TRANSLITERATIONS, BERT_TOKEN_MAPPING
 from typing import List, Dict, Union, Tuple
 from utils.trees import InternalParseNode, LeafParseNode
 from transformers import BertModel, BertTokenizerFast
-from config.Constants import NER_LABELS, STOP, START, TAG_UNK, PAD_STATEGY, TRUNCATION_STATEGY, CHARACTER_BASED
+from config.Constants import NER_LABELS, PAD_STATEGY, TRUNCATION_STATEGY, CHARACTER_BASED
 from model.transformer import LearnedPositionalEmbedding, Transformer
 from model.partition_transformer import PartitionTransformer
 
 
 class JointModel(nn.Module):
     def __init__(self, joint_vocabs: Dict[str, Vocabulary], parsing_vocabs: Dict[str, Vocabulary],
-                 subword: str, use_pos_tag: bool, bert_path: str,
-                 transliterate: str, d_model: int, partition: bool, pos_tag_emb_dropout: float,
+                 subword: str, bert_path: str,
+                 transliterate: str, d_model: int, partition: bool,
                  position_emb_dropout: float, bert_emb_dropout: float, emb_dropout: float, layer_num: int,
                  hidden_dropout: float, attention_dropout: float, dim_ff: int, nhead: int, kqv_dim: int,
                  label_hidden: int, lambda_scaler: float, alpha_scaler: float, language: str, device: torch.device):
         super(JointModel, self).__init__()
 
         self.embeddings = EmbeddingLayer(
-            joint_vocabs, subword, use_pos_tag, bert_path, transliterate, d_model, partition, pos_tag_emb_dropout,
+            joint_vocabs, subword, bert_path, transliterate, d_model, partition,
             position_emb_dropout, bert_emb_dropout, emb_dropout, language, device
         )
 
@@ -68,9 +69,9 @@ class JointModel(nn.Module):
             pred tensor outputed by model
         """
         pos_tags, snts = insts['pos_tags'], insts['snts']
-        snts_len = [len(pos_tag) for pos_tag in pos_tags]
+        snts_len = [len(snt) for snt in snts]
         batch_size, seq_len = len(snts_len), max(snts_len)
-        embeddings, mask = self.embeddings(pos_tags, snts)
+        embeddings, mask = self.embeddings(snts)
         assert (batch_size, seq_len + 2) == embeddings.shape[0:2] == mask.shape[0:2]
         words_repr = self.encoder(embeddings, mask)
         assert (batch_size, seq_len+1) == words_repr.shape[0:2]
@@ -78,19 +79,10 @@ class JointModel(nn.Module):
         assert (batch_size, seq_len+1, seq_len+1) == spans_repr.shape[0:3]
 
         joint_repr = self.joint_label_classifier(spans_repr)
-        parsing_repr = self.parsing_label_classifier(spans_repr)
-        ner_repr = joint_repr - parsing_repr
-
         joint_labels_score = self.joint_classifier(joint_repr)
-        parsing_labels_score = self.parsing_classifier(parsing_repr)
-        ner_labels_score = self.ner_classifier(ner_repr[:, :-1, :-1, :])
-        # ner_labels_score = self.ner_classifier(ner_repr[:, :-1, 1:, :])
-
         empty_label_score = torch.zeros((batch_size, seq_len+1, seq_len+1, 1), device=self.device)
         joint_charts = torch.cat([empty_label_score, joint_labels_score], dim=3)
-        parsing_charts = torch.cat([empty_label_score, parsing_labels_score], dim=3)
         joint_charts_np = joint_charts.cpu().detach().numpy()
-        parsing_charts_np = parsing_charts.cpu().detach().numpy()
 
         # compute loss and generate tree
 
@@ -114,6 +106,15 @@ class JointModel(nn.Module):
                 scores.append(score)
             return trees, scores
 
+        parsing_repr = self.parsing_label_classifier(spans_repr)
+        parsing_labels_score = self.parsing_classifier(parsing_repr)
+        parsing_charts = torch.cat([empty_label_score, parsing_labels_score], dim=3)
+        parsing_charts_np = parsing_charts.cpu().detach().numpy()
+
+        ner_repr = joint_repr - parsing_repr
+        ner_labels_score = self.ner_classifier(ner_repr[:, :-1, :-1, :])
+        # ner_labels_score = self.ner_classifier(ner_repr[:, :-1, 1:, :])
+
         # when model train, return loss
         # During training time, the forward pass needs to be computed for every
         # cell of the chart, but the backward pass only needs to be computed for
@@ -123,7 +124,6 @@ class JointModel(nn.Module):
         # Since this code is not undergoing algorithmic changes, it makes sense
         # to include the optimization even though it may only be a 10% speedup.
         # Note that no dropout occurs in the label portion of the network
-        # cross_loss = torch.tensor(0., device=self.device)
         joint_golds = insts['joint_gold_trees']
         parsing_golds = insts['parsing_gold_trees']
         p_is, p_js, g_is, g_js, p_labels, g_labels, batch_ids, paugment_total_joint = [], [], [], [], [], [], [], 0.0
@@ -179,6 +179,16 @@ class JointModel(nn.Module):
 
         loss = loss_joint + self.lambda_scaler*((self.alpha_scaler+1.)*loss_parsing + (1.-self.alpha_scaler)*ner_loss)
         return loss
+
+    def load_pretrain_model(self, path: str):
+        print('loading pretrained model from %s' % path)
+        self.embeddings.BERT = BertModel.from_pretrained(path)
+        self.embeddings.tokenizer = BertTokenizerFast.from_pretrained(path)
+        other_model_param = torch.load(os.path.join(path, 'other.pt'), map_location='cpu')
+        self.embeddings.layer_norm.load_state_dict(other_model_param['embedding.layer_norm'])
+        self.embeddings.bert_proj.load_state_dict(other_model_param['embedding.bert_proj'])
+        self.embeddings.position_embeddings.load_state_dict(other_model_param['embedding.position_embeddings'])
+        self.encoder.transf.load_state_dict(other_model_param['encoder.transf'])
 
     def generate_ner_spans(self, tree: InternalParseNode):
         ner_i, ner_j, ner_label = [], [], []
@@ -254,8 +264,8 @@ class JointModel(nn.Module):
 
 class EmbeddingLayer(nn.Module):
 
-    def __init__(self, vocabs: Dict[str, Vocabulary], subword: str, use_pos_tag: bool, bert_path: str,
-                 transliterate: str, d_model: int, partition: bool, pos_tag_emb_dropout: float,
+    def __init__(self, vocabs: Dict[str, Vocabulary], subword: str, bert_path: str,
+                 transliterate: str, d_model: int, partition: bool,
                  position_emb_dropout: float, bert_emb_dropout: float, emb_dropout: float, language: str,
                  device: torch.device):
         super(EmbeddingLayer, self).__init__()
@@ -280,13 +290,6 @@ class EmbeddingLayer(nn.Module):
         self.d_content = d_model // 2 if partition else d_model
         self.d_position = d_model - d_model//2 if partition else d_model
         self.bert_proj = nn.Linear(self.bert_hidden_size, self.d_content)
-        self.pos_tag_embeddings = None
-        self.pos_tag_emb_dropout = None
-        self.use_pos_tag = use_pos_tag
-        if use_pos_tag:
-            self.pos_tag_emb_dropout = nn.Dropout(pos_tag_emb_dropout)
-            self.pos_tag_embeddings = nn.Embedding(vocabs['pos_tags'].size+1, self.d_content,
-                                                   padding_idx=vocabs['pos_tags'].size)
 
         self.position_embeddings = LearnedPositionalEmbedding(self.d_position, max_len=512)
 
@@ -304,17 +307,14 @@ class EmbeddingLayer(nn.Module):
         self.labels_vocab = vocabs['labels']
         self.device = device
 
-    def forward(self, pos_tags: List[List[str]], snts: List[List[str]]):
+    def forward(self, snts: List[List[str]]):
         # BERT tokenize
-        ids, pos_tags_ids, bert_mask, snts_mask, offsets = self.__tokenize(pos_tags, snts)
+        ids, bert_mask, snts_mask, offsets = self.__tokenize(snts)
         batch_size, seq_len = snts_mask.shape
         bert_embeddings = self.BERT(ids, attention_mask=bert_mask)[0]  # [batch_size, seq_len, dim]
         if self.subword != CHARACTER_BASED:
             bert_embeddings = self.__process_subword_repr(bert_embeddings, offsets, batch_size, seq_len, snts)
         content_embeddings = self.bert_proj(self.bert_emb_dropout(bert_embeddings))
-        if self.use_pos_tag:
-            pos_tags_embeddings = self.pos_tag_emb_dropout(self.pos_tag_embeddings(pos_tags_ids))
-            content_embeddings = torch.add(content_embeddings, pos_tags_embeddings)
         position_embeddings = self.position_emb_dropout(self.position_embeddings(batch_size, seq_len))
         if self.partition:
             embeddings = torch.cat([content_embeddings, position_embeddings.expand(batch_size, -1, -1)], dim=2)
@@ -323,7 +323,7 @@ class EmbeddingLayer(nn.Module):
         assert embeddings.shape[2] == self.d_model
         return self.emb_dropout(self.layer_norm(embeddings)), snts_mask
 
-    def __tokenize(self, pos_tags: List[List[str]], snts: List[List[str]])\
+    def __tokenize(self, snts: List[List[str]])\
             -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, List[List[int]]]:
         """tokenize the sentences and generate offset list and pos tags id.
         Args:
@@ -332,13 +332,6 @@ class EmbeddingLayer(nn.Module):
         Returns:
             offsets: [batch_size, seq_len], e.g., [0, 1, 1, 1, 2, 2, 3, 4] for one sentence.
         """
-        # generate pos tag ids
-        pos_tags_ids = None
-        if self.use_pos_tag:
-            max_len = max(len(pos_tag) for pos_tag in pos_tags)
-            pos_tags_ids = [[self.pos_tags_vocab.index_or_unk(tag, TAG_UNK)
-                            for tag in [START]+pos_tag+[STOP]] + [self.pos_tags_vocab.size]*(max_len-len(pos_tag))
-                            for pos_tag in pos_tags]
 
         # generate sents mask
         max_len = max(len(snt) for snt in snts)
@@ -396,7 +389,6 @@ class EmbeddingLayer(nn.Module):
 
         return (
             torch.tensor(ids, dtype=torch.long, device=self.device),
-            torch.tensor(pos_tags_ids, dtype=torch.long, device=self.device) if self.use_pos_tag else None,
             torch.tensor(attention_mask, dtype=torch.int, device=self.device),
             torch.tensor(snts_mask, dtype=torch.int, device=self.device),
             offsets

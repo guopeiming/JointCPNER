@@ -53,7 +53,9 @@ def eval_model(
     model: torch.nn.Module, dataset: DataLoader, DATASET_MAX_SNT_LENGTH: int, BATCH_MAX_SNT_LENGTH: int, type_: str
 ) -> float:
     torch.cuda.empty_cache()
-    total, tp = 0, 0
+    total_subtree, tp_subtree = 0, 0
+    total_head, tp_head = 0, 0
+    total_mask_lm, tp_mask_lm = 0, 0
     for insts in dataset:
         model.eval()
         insts, _, max_len = batch_filter(insts, DATASET_MAX_SNT_LENGTH)
@@ -63,21 +65,27 @@ def eval_model(
             assert len(subtree_pred) == len(subtree_gold)
             for p, g in zip(subtree_pred, subtree_gold):
                 if p == g:
-                    tp += 1
-                total += 1
+                    tp_subtree += 1
+                total_subtree += 1
             assert len(head_pred) == len(head_gold)
             for p, g in zip(head_pred, head_gold):
                 if p == g:
-                    tp += 1
-                total += 1
+                    tp_head += 1
+                total_head += 1
             assert len(mask_lm_pred) == len(mask_lm_gold)
             for p, g in zip(mask_lm_pred, mask_lm_gold):
                 if p == g:
-                    tp += 1
-                total += 1
-    print('Model performance in %s dataset: acc: %.03f' % (type_, tp/total*100))
+                    tp_mask_lm += 1
+                total_mask_lm += 1
+    print(
+        'Model performance in %s dataset: subtree_acc: %.03f, head_acc: %.03f, mask_lm: %.03f, total_acc: %.03f' %
+        (
+            type_, tp_subtree/total_subtree*100, tp_head/total_head*100, tp_mask_lm/total_mask_lm*100,
+            (tp_subtree+tp_head+tp_mask_lm)/(total_subtree+total_head+total_mask_lm)*100
+        )
+    )
     torch.cuda.empty_cache()
-    return tp/total
+    return (tp_subtree+tp_head+tp_mask_lm)/(total_subtree+total_head+total_mask_lm)*100
 
 
 def main():
@@ -164,7 +172,7 @@ def main():
                     best_dev = dev_acc
                     patience = args.patience
                     model.save_models(os.path.join(args.save_path, 'best.model/'))
-                print('best performance: dev:%.03f' % (best_dev*100))
+                print('best performance: ACC: %.03f' % (best_dev*100))
                 print('model evaluating ends...', flush=True)
                 if args.early_stop:
                     if patience < 0:
