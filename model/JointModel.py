@@ -300,8 +300,6 @@ class EmbeddingLayer(nn.Module):
             self.bert_transliterate = TRANSLITERATIONS[transliterate]
         self.subword = subword
         self.language = language
-        if self.subword == CHARACTER_BASED and self.language == 'chinese':
-            assert not self.use_pos_tag
 
         self.pos_tags_vocab = vocabs['pos_tags']
         self.labels_vocab = vocabs['labels']
