@@ -18,7 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--gpuid', default=0, type=int, help='id of gpu')
     parser.add_argument('--batch_size', default=16, type=int, help='how many insts per batch to load')
     parser.add_argument('--accum_steps', default=2, type=int, help='the number of accumulated steps before backward')
-    parser.add_argument('--epoch', default=4, type=int, help='max training epoch')
+    parser.add_argument('--epoch', default=10, type=int, help='max training epoch')
     parser.add_argument('--log_interval', default=625, type=int, help='interval on print log info')
     parser.add_argument('--eval_interval', default=3125, type=int, help='interval on print evaluate model')
     parser.add_argument('--save_interval', default=15625, type=int, help='interval on save model')
