@@ -367,7 +367,7 @@ def load_data(
     dev_data_list = load_dataset(os.path.join(path,  ('small.'if debug else '')+'dev.corpus'))
     print('len(dev_data): %d' % len(dev_data_list), flush=True)
 
-    fre_dict = {'english': (13, 30), CHARACTER_BASED: (13, 30), 'NONE'+CHARACTER_BASED: (13, 75)}
+    fre_dict = {'english': (13, 30), CHARACTER_BASED: (15, 30), 'NONE'+CHARACTER_BASED: (15, 80)}
     if language == 'english':
         subtree_fre, token_fre = fre_dict[language]
     elif language == 'chinese' and subword == CHARACTER_BASED:

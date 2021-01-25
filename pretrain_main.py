@@ -61,22 +61,13 @@ def eval_model(
         insts, _, max_len = batch_filter(insts, DATASET_MAX_SNT_LENGTH)
         insts_list = batch_spliter(insts, max_len, BATCH_MAX_SNT_LENGTH)
         for insts in insts_list:
-            subtree_pred, head_pred, mask_lm_pred, subtree_gold, head_gold, mask_lm_gold = model(insts)
-            assert len(subtree_pred) == len(subtree_gold)
-            for p, g in zip(subtree_pred, subtree_gold):
-                if p == g:
-                    tp_subtree += 1
-                total_subtree += 1
-            assert len(head_pred) == len(head_gold)
-            for p, g in zip(head_pred, head_gold):
-                if p == g:
-                    tp_head += 1
-                total_head += 1
-            assert len(mask_lm_pred) == len(mask_lm_gold)
-            for p, g in zip(mask_lm_pred, mask_lm_gold):
-                if p == g:
-                    tp_mask_lm += 1
-                total_mask_lm += 1
+            b_s, b_s_tp, b_h, b_h_tp, b_m, b_m_tp = model(insts)
+            total_subtree += b_s
+            tp_subtree += b_s_tp
+            total_head += b_h
+            tp_head += b_h_tp
+            total_mask_lm += b_m
+            tp_mask_lm += b_m_tp
     print(
         'Model performance in %s dataset: subtree_acc: %.03f, head_acc: %.03f, mask_lm: %.03f, total_acc: %.03f' %
         (
@@ -137,6 +128,9 @@ def main():
     steps, loss_value, total_batch_size = 1, 0., 0
     best_dev = 0.
     patience = args.patience
+    total_subtree, tp_subtree = 0, 0
+    total_head, tp_head = 0, 0
+    total_mask_lm, tp_mask_lm = 0, 0
     for epoch_i in range(1, args.epoch+1):
         for batch_i, insts in enumerate(train_data, start=1):
             model.train()
@@ -145,7 +139,13 @@ def main():
             insts_list = batch_spliter(insts, max_len, args.BATCH_MAX_SNT_LENGTH)
             total_batch_size += batch_size
             for insts in insts_list:
-                loss = model(insts)
+                loss, b_s, b_s_tp, b_h, b_h_tp, b_m, b_m_tp = model(insts)
+                total_subtree += b_s
+                tp_subtree += b_s_tp
+                total_head += b_h
+                tp_head += b_h_tp
+                total_mask_lm += b_m
+                tp_mask_lm += b_m_tp
                 if loss.item() > 0.:
                     loss.backward()
                     loss_value += loss.item()
@@ -156,11 +156,17 @@ def main():
                 optimizer.zero_grad()
             if steps % (args.accum_steps * args.log_interval) == 0:
                 print(
-                    '[%d/%d], [%d/%d] Loss: %.05f' %
-                    (epoch_i, args.epoch, batch_i//args.accum_steps, len(train_data)//args.accum_steps,
-                     loss_value/total_batch_size), flush=True
+                    '[%d/%d], [%d/%d] Loss: %.05f, subtree_acc: %.03f, head_acc: %.03f, mask_lm: %.03f, total_acc: %.03f'
+                    % (
+                        epoch_i, args.epoch, batch_i//args.accum_steps, len(train_data)//args.accum_steps,
+                        loss_value/total_batch_size, tp_subtree/total_subtree*100, tp_head/total_head*100,
+                        tp_mask_lm/total_mask_lm*100,
+                        (tp_subtree+tp_head+tp_mask_lm)/(total_subtree+total_head+total_mask_lm)*100), flush=True
                 )
                 loss_value, total_batch_size = 0., 0
+                total_subtree, tp_subtree = 0, 0
+                total_head, tp_head = 0, 0
+                total_mask_lm, tp_mask_lm = 0, 0
                 torch.cuda.empty_cache()
             if steps % (args.accum_steps * args.eval_interval) == 0:
                 patience -= 1
@@ -172,7 +178,7 @@ def main():
                     best_dev = dev_acc
                     patience = args.patience
                     model.save_models(os.path.join(args.save_path, 'best.model/'))
-                print('best performance: ACC: %.03f' % (best_dev*100))
+                print('best performance: ACC: %.03f' % (best_dev))
                 print('model evaluating ends...', flush=True)
                 if args.early_stop:
                     if patience < 0:

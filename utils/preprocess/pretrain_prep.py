@@ -5,6 +5,7 @@ from spacy import Language
 from typing import Counter, List, Set, Union
 import collections
 from multiprocessing import Process
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 
 class Tree(object):
@@ -138,10 +139,10 @@ class Tree(object):
         if self.is_leaf:
             head_list = head_lists[self.left]
             assert len(head_list) == len(self.word)
-            text = ''
+            text = []
             for i in range(len(self.word)):
-                text += '(%s %s) ' % (str(head_list[i]), self.word[i])
-            return text[:-1]
+                text.append('(%s %s)' % (str(head_list[i]), self.word[i]))
+            return ' '.join(text)
         else:
             text = ' '.join([child.linearize_convert_char(head_lists) for child in self.children])
         return '(%s %s)' % (self.label, text)
@@ -190,6 +191,7 @@ def build_tree(tokens: List[str], idx: int, span_startpoint_idx: int):
         assert not tree.is_leaf
     elif tokens[idx] == ')':
         print('No word!!!')
+        print(tokens, idx, tokens[idx-1])
         exit(-1)
     else:
         word = tokens[idx]
@@ -228,6 +230,8 @@ def preprocessing(language: str):
         exit(-1)
 
     nlp.disable_pipes('tagger', 'parser', 'attribute_ruler')
+    if language == 'en':
+        nlp.disable_pipe('lemmatizer')
     nlp.add_pipe('component', name='cp_parser', last=True)
     return nlp
 
@@ -239,16 +243,33 @@ def is_chinese(check_str):
         return False
 
 
-def sent_cleaning(sent: str, language: str, special_tokens: Set):
+def sent_cleaning_zh(sent: str, special_tokens: Set):
     res = ''
     for i in range(len(sent)):
         char = sent[i]
         if char == ' ':
-            if (language == 'zh') and ((i == len(sent)-1) or i == 0 or (is_chinese(sent[i-1]) and is_chinese(sent[i+1])) or res[-1]==' '):
+            if ((i == len(sent)-1) or i == 0 or (is_chinese(sent[i-1]) and is_chinese(sent[i+1])) or res[-1] == ' '):
                 char = ''
         if char in special_tokens:
             char = ('' if len(res) == 0 or res[-1] == ' ' else ' ') + char+' '
         res += char
+    return res
+
+
+def sent_cleaning_en(sent: str):
+    res = []
+    for word_pos in sent.split(' '):
+        if '\xa0' in word_pos:
+            print('delete \xa0 in %s' % word_pos, flush=True)
+            word_pos = word_pos.split()[-1]
+        word_pos_list = word_pos.split('_')
+        if len(word_pos_list) != 2:
+            if word_pos.startswith('_'):
+                word_pos_list[0] = '_'
+            else:
+                print('error word_pos %s' % word_pos, flush=True)
+                continue
+        res.append(word_pos_list[0])
     return res
 
 
@@ -282,13 +303,29 @@ def raw_corpus_processing(corpus_file: str, language: str):
     nlp = preprocessing(language)
 
     with open(corpus_file, 'r', encoding='utf-8') as reader,\
-         open(os.path.join(os.path.dirname(corpus_file), os.path.basename(corpus_file)+'.par.out'), 'w', encoding='utf-8') as par_writer,\
+         open(os.path.join(os.path.dirname(corpus_file), os.path.basename(corpus_file)+'.cpar.out'), 'w', encoding='utf-8') as par_writer,\
          open(os.path.join(os.path.dirname(corpus_file), os.path.basename(corpus_file)+'.ner.out'), 'w', encoding='utf-8') as ner_writer:
 
         special_tokens = set(['(', ')', '{', '}', '[', ']'])
         for i, line in enumerate(reader):
             line = line.strip()
-            sent = sent_cleaning(line, language, special_tokens)
+            # if i < 10530:
+            #     continue
+            if language == 'zh':
+                sent = sent_cleaning_zh(line, special_tokens)
+            elif language == 'en':
+                sent = sent_cleaning_en(line)
+                if len(sent) > 222 or len(sent) == 0:
+                    print('delete long sentence %s' % ' '.join(sent))
+                    continue
+                else:
+                    sent = ' '.join(sent)
+                    if len(sent) > 1100:
+                        print('delete long sentence %s' % sent)
+                        continue
+            else:
+                print('language error %s' % language)
+                exit(-1)
             batch_sents.append(sent)
             if len(batch_sents) == batch_size:
                 tree_strings, entities = parsing(batch_sents, nlp)
@@ -302,7 +339,7 @@ def raw_corpus_processing(corpus_file: str, language: str):
 
 def annotate_main(gpuid: int, file: str, language: str):
     print('subprocess %d starts' % os.getpid(), flush=True)
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
     # os.environ["CUDA_VISIBLE_DEVICES"] = str(gpuid)
     # spacy.require_gpu()
     raw_corpus_processing(file, language)
@@ -466,7 +503,9 @@ def convert_word_to_char_dataset(path: str, char_path: str, subtree_path: str, t
 
 
 if __name__ == '__main__':
-    # annotate_main(7, './data/pretrain/small.corpus', 'zh')
+    start = time.time()
+    annotate_main(7, './data/pretrain/7.corpus', 'en')
+    print(time.time() - start)
     # multi_process_annotate()
     # generate_pretrain_dataset(
     #     './data/pretrain/zh.cpar.corpus', './data/pretrain/zh.dpar.corpus',
@@ -474,9 +513,9 @@ if __name__ == '__main__':
     #     './data/pretrain_word/subtree.vocab',
     #     './data/pretrain_word/token.vocab', 10
     # )
-    start = time.time()
-    convert_word_to_char_dataset(
-        './data/pretrain_word/dev.corpus', './data/pretrain_char/dev.corpus',
-        './data/pretrain_char/dev.subtree.vocab', './data/pretrain_char/dev.token.vocab', 10
-    )
-    print(time.time() - start)
+    # start = time.time()
+    # convert_word_to_char_dataset(
+    #     './data/pretrain_word/dev.corpus', './data/pretrain_char/dev.corpus',
+    #     './data/pretrain_char/dev.subtree.vocab', './data/pretrain_char/dev.token.vocab', 10
+    # )
+    # print(time.time() - start)

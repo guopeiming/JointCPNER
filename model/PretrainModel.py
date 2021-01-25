@@ -119,10 +119,13 @@ class PretrainModel(nn.Module):
         total_loss = subtree_loss+children_head_loss+mask_lm_loss
 
         if self.training:
-            return total_loss
+            return (total_loss, *self.get_pred(
+                subtree_logits, children_head_logits, mask_lm_logits,
+                subtree_label_list, head_label_list, mask_token_label_list)
+            )
         else:
-            return (
-                *self.get_pred(subtree_logits, children_head_logits, mask_lm_logits),
+            return self.get_pred(
+                subtree_logits, children_head_logits, mask_lm_logits,
                 subtree_label_list, head_label_list, mask_token_label_list
             )
 
@@ -130,17 +133,36 @@ class PretrainModel(nn.Module):
         self,
         subtree_logits: torch.Tensor,
         children_head_logits: torch.Tensor,
-        mask_lm_logits: torch.Tensor
+        mask_lm_logits: torch.Tensor,
+        subtree_gold: List[int],
+        head_gold: List[int],
+        mask_token_gold: List[int]
     ):
         _, subtree_label = torch.max(subtree_logits, dim=1)  # [len]
         subtree_label = subtree_label.cpu().tolist()
+        total_subtree = len(subtree_gold)
+        tp_subtree = 0
+        for a, b in zip(subtree_label, subtree_gold):
+            if a == b:
+                tp_subtree += 1
 
         _, children_head_label = torch.max(children_head_logits, dim=1)
         children_head_label = children_head_label.cpu().tolist()
+        total_head = len(head_gold)
+        tp_head = 0
+        for a, b in zip(children_head_label, head_gold):
+            if a == b:
+                tp_head += 1
 
         _, mask_lm_label = torch.max(mask_lm_logits, dim=1)
         mask_lm_label = mask_lm_label.cpu().tolist()
-        return subtree_label, children_head_label, mask_lm_label
+        total_mask_token = len(mask_token_gold)
+        tp_mask_token = 0
+        for a, b in zip(mask_lm_label, mask_token_gold):
+            if a == b:
+                tp_mask_token += 1
+
+        return total_subtree, tp_subtree, total_head, tp_head, total_mask_token, tp_mask_token
 
     def snts_mask(self, snts: List[List[str]], subtree_spans: List[List[int]]) -> List[Tuple[int, int]]:
         assert len(snts) == len(subtree_spans)
