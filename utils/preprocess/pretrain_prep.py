@@ -504,7 +504,7 @@ def convert_word_to_char_dataset(path: str, char_path: str, subtree_path: str, t
 
 if __name__ == '__main__':
     start = time.time()
-    annotate_main(7, './data/pretrain/7.corpus', 'en')
+    annotate_main(7, './data/pretrain/4.corpus', 'en')
     print(time.time() - start)
     # multi_process_annotate()
     # generate_pretrain_dataset(

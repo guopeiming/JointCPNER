@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--name', default='JointModel', type=str, help='name of model')
     parser.add_argument('--subword', default='character_based', type=str, choices=['character_based', 'endpoint', 'startpoint', 'max_pool', 'avg_pool'], help='the method to represent word from BERT subword')
     # [Model-Embedding]
-    parser.add_argument('--bert_path', default='./data/model/bert-base-cased/', type=str, help='path of BERT')
+    parser.add_argument('--bert_path', default='./data/model/bert-base-chinese/', type=str, help='path of BERT')
     parser.add_argument('--d_model', default=1024, type=int, help='model dimension')
     parser.add_argument('--partition', default=True, type=bool, help='whether to use content and position partition')
     parser.add_argument('--position_emb_dropout', default=0.0, type=float, help='position embedding dropout')
