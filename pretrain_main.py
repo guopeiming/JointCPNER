@@ -184,7 +184,7 @@ def main():
                     if patience < 0:
                         break
             if steps % (args.accum_steps * args.save_interval) == 0:
-                model.save_models(os.path.join(args.save_path, str(steps)+'.steps.model/'))
+                model.save_models(os.path.join(args.save_path, str(steps/args.accum_steps)+'.steps.model/'))
             steps += 1
 
         if args.early_stop:
